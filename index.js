@@ -8,9 +8,18 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 let MOVIES = [];
 
+function extractYear(title) {
+    const m = title.match(/\((\d{4})\)\s*$/);
+    return m ? m[1] : null;
+}
+
 try {
     const data = JSON.parse(fs.readFileSync(path.join(__dirname, process.env.DATA_FILE || 'data.json'), 'utf8'));
-    MOVIES = data.map((m, i) => ({ id: i, title: m.title || 'Sin título', poster: m.logo || '', url: m.url || '' }));
+    MOVIES = data.map((m, i) => {
+        const title = m.title || 'Sin título';
+        const year = extractYear(title);
+        return { id: i, title, poster: m.logo || '', url: m.url || '', year };
+    });
     console.log(`✓ ${MOVIES.length} películas`);
 } catch (e) { console.error('Error:', e.message); }
 
@@ -22,10 +31,18 @@ app.use((req, res, next) => {
     next();
 });
 
+app.get('/api/years', (req, res) => {
+    const years = [...new Set(MOVIES.map(m => m.year).filter(Boolean))].sort((a, b) => b - a);
+    res.json(years);
+});
+
 app.get('/api/movies', (req, res) => {
-    const { page = 0, limit = 200, q = '', random } = req.query;
-    let list = q ? MOVIES.filter(m => m.title.toLowerCase().includes(q.toLowerCase())) : [...MOVIES];
+    const { page = 0, limit = 200, q = '', random, year } = req.query;
+    let list = [...MOVIES];
+    if (q) list = list.filter(m => m.title.toLowerCase().includes(q.toLowerCase()));
+    if (year) list = list.filter(m => m.year === year);
     if (random === 'true') list.sort(() => Math.random() - 0.5);
+    else if (!year && !q) list.sort((a, b) => (b.year || '0').localeCompare(a.year || '0') || a.title.localeCompare(b.title));
     const start = page * limit;
     res.json({ total: list.length, hasMore: start + +limit < list.length, data: list.slice(start, start + +limit) });
 });
@@ -71,12 +88,17 @@ html,body{background:var(--bg);color:var(--t);font-family:system-ui,sans-serif;h
 .btn{background:var(--c);border:2px solid var(--b);color:var(--t);padding:10px 16px;border-radius:8px;font-weight:600;cursor:pointer;transition:all 0.2s}
 .btn:hover,.btn.f{background:var(--p);color:#000;border-color:var(--p)}
 .stats{color:var(--t2);font-size:12px;margin-left:auto}
+.years-bar{display:flex;align-items:center;gap:6px;padding:8px 12px;background:var(--s);border-bottom:1px solid var(--b);overflow-x:auto;scrollbar-width:none;-webkit-overflow-scrolling:touch}
+.years-bar::-webkit-scrollbar{display:none}
+.yr-btn{flex-shrink:0;background:var(--c);border:2px solid var(--b);color:var(--t2);padding:5px 12px;border-radius:20px;font-size:13px;font-weight:600;cursor:pointer;transition:all 0.2s;white-space:nowrap}
+.yr-btn:hover{border-color:var(--p);color:var(--t)}
+.yr-btn.active,.yr-btn.f{background:var(--p);color:#000;border-color:var(--p)}
 .main{flex:1;overflow-y:auto;padding:10px;-webkit-overflow-scrolling:touch}
 .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:8px}
 .card{position:relative;aspect-ratio:2/3;background:var(--c);border-radius:6px;overflow:hidden;border:2px solid transparent;cursor:pointer;transition:transform 0.15s, border-color 0.15s}
 .card:hover{transform:scale(1.02)}
 .card.f{border-color:var(--p);transform:scale(1.05);box-shadow:0 0 15px rgba(245,197,24,.3);z-index:10}
-.card img{width:100%;height:100%;object-fit:cover;background:linear-gradient(45deg,#1a1a1a 25%,#222 25%,#222 50%,#1a1a1a 50%,#1a1a1a 75%,#222 75%,#222);background-size:20px 20px;opacity:0;transition:opacity 0.3s ease-in-out}
+.card img{width:100%;height:100%;object-fit:cover;background:linear-gradient(45iBEuswpf9efNpNHdM3mCLFTe5sg9aFRXuMYVbZJ1UeQbwzQKiKJFfgmZg82soLL8f23Gs34dqWQ5pDuPHDT4uHRe81DdE 20px;opacity:0;transition:opacity 0.3s ease-in-out}
 .card img.loaded{opacity:1}
 .card-t{position:absolute;bottom:0;left:0;right:0;padding:20px 6px 6px;background:linear-gradient(transparent,#000);font-size:11px;font-weight:600;opacity:0;transform:translateY(5px);transition:opacity 0.2s, transform 0.2s}
 .card.f .card-t{opacity:1;transform:translateY(0)}
@@ -96,7 +118,7 @@ video{flex:1;width:100%;background:#000}
 .p-bar-fill{position:absolute;left:0;top:0;height:100%;background:var(--p);border-radius:3px}
 .p-bar-buf{position:absolute;left:0;top:0;height:100%;background:#666;border-radius:3px;z-index:-1}
 .p-ctrl{display:flex;justify-content:center;gap:10px}
-.p-btn{width:44px;height:44px;background:rgba(255,255,255,.1);border:none;border-radius:50%;color:#fff;font-size:13px;font-weight:700;cursor:pointer;transition:background 0.2s}
+.p-btn{width:45iBEuswpf9efNpNHdM3mCLFTe5sg9aFRXuMYVbZJ1UeQbwzQKiKJFfgmZg82soLL8f23Gs34dqWQ5pDuPHDT4uHRe81DdEsize:13px;font-weight:700;cursor:pointer;transition:background 0.2s}
 .p-btn:hover,.p-btn:active,.p-btn.f{background:var(--p);color:#000}
 .p-btn.main{width:52px;height:52px;font-size:18px}
 .p-load,.p-err{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);text-align:center;display:none}
@@ -113,6 +135,7 @@ video{flex:1;width:100%;background:#000}
     <button class="btn" id="mix">🎲</button>
     <span class="stats" id="stats"></span>
 </div>
+<div class="years-bar" id="yearsBar"></div>
 <div class="main" id="main"><div class="grid" id="grid"><div class="msg load">Cargando</div></div></div>
 <div class="player" id="player">
 <video id="vid" playsinline webkit-playsinline></video>
@@ -130,6 +153,7 @@ video{flex:1;width:100%;background:#000}
 const $=id=>document.getElementById(id);
 const el={
     logo:$('logo'), grid:$('grid'), main:$('main'), srch:$('srch'), mix:$('mix'), stats:$('stats'),
+    yearsBar:$('yearsBar'),
     player:$('player'), vid:$('vid'), pUi:$('pUi'), pTitle:$('pTitle'), pLoad:$('pLoad'), 
     pLoadTxt:$('pLoadTxt'), pErr:$('pErr'), pErrTxt:$('pErrTxt'), pInd:$('pInd'), pBar:$('pBar'), 
     pFill:$('pFill'), pBuf:$('pBuf'), pCur:$('pCur'), pDur:$('pDur'), pRw:$('pRw'), pPp:$('pPp'), 
@@ -139,34 +163,52 @@ const el={
 const S={
     view:'home', movies:[], focus:null, lastFocus:null, playing:false, retry:0,
     imgObserver:null, gridCols:0, currentIndex:-1,
-    headerElements:[], // Logo, Search, Mix - en orden de navegación
-    headerIndex:0 // Índice actual en el header
+    headerElements:[],
+    headerIndex:0,
+    selectedYear:null,
+    yearBtns:[]
 };
 
-// ===== INICIALIZACIÓN =====
 history.replaceState({v:'home'},'','#home');
 window.onpopstate=()=>{if(S.view==='player'){closeP();history.pushState({v:'home'},'','#home')}};
 
 function init() {
-    // Configurar elementos del header
     S.headerElements = [el.logo, el.srch, el.mix];
 
-    fetch('/api/movies?limit=200&random=true').then(r=>r.json()).then(d=>{
-        el.stats.textContent=d.total+' películas';
-        el.grid.innerHTML='';
-        S.movies=d.data;
-        d.data.forEach(m=>el.grid.appendChild(mkCard(m)));
+    fetch('/api/years').then(r=>r.json()).then(years=>{
+        buildYearsBar(years);
+    });
 
-        // Calcular columnas del grid
-        calculateGridColumns();
+    loadMovies(false);
+}
 
-        // Inicializar lazy loading
-        initLazyLoading();
+function buildYearsBar(years) {
+    el.yearsBar.innerHTML = '';
+    S.yearBtns = [];
 
-        // Enfocar logo inicialmente
-        setFocusHeader(0);
+    const allBtn = document.createElement('button');
+    allBtn.className = 'yr-btn active';
+    allBtn.textContent = 'Todos';
+    allBtn.onclick = () => selectYear(null);
+    el.yearsBar.appendChild(allBtn);
+    S.yearBtns.push({ btn: allBtn, year: null });
 
-    }).catch(()=>el.grid.innerHTML='<div class="msg">Error</div>');
+    years.forEach(y => {
+        const btn = document.createElement('button');
+        btn.className = 'yr-btn';
+        btn.textContent = y;
+        btn.onclick = () => selectYear(y);
+        el.yearsBar.appendChild(btn);
+        S.yearBtns.push({ btn, year: y });
+    });
+}
+
+function selectYear(year) {
+    S.selectedYear = year;
+    S.yearBtns.forEach(({ btn, year: y }) => {
+        btn.classList.toggle('active', y === year);
+    });
+    loadMovies(false);
 }
 
 // ===== LAZY LOADING CON ANIMACIÓN SUAVE =====
@@ -184,11 +226,10 @@ function initLazyLoading() {
             }
         });
     }, {
-        rootMargin: '300px 0px', // Cargar antes de que entren al viewport
+        rootMargin: '300px 0px',
         threshold: 0.01
     });
 
-    // Observar todas las imágenes
     document.querySelectorAll('.card img[data-src]').forEach(img => {
         S.imgObserver.observe(img);
     });
@@ -202,14 +243,12 @@ function loadImageWithAnimation(img) {
 
     imgEl.onload = () => {
         img.src = src;
-        // Forzar reflow para activar la animación
         void img.offsetWidth;
         img.classList.add('loaded');
         img.style.background = 'none';
     };
 
     imgEl.onerror = () => {
-        // Usar placeholder SVG con animación
         img.src = 'data:image/svg+xml;base64,' + btoa(
             '<svg xmlns="http://www.w3.org/2000/svg" width="130" height="195" viewBox="0 0 130 195">' +
             '<rect width="130" height="195" fill="#1a1a1a"/>' +
@@ -220,7 +259,6 @@ function loadImageWithAnimation(img) {
         img.style.background = 'none';
     };
 
-    // Pequeño delay para mostrar la animación de carga
     setTimeout(() => {
         imgEl.src = src;
     }, 100);
@@ -230,7 +268,6 @@ function preloadAdjacentImages(index) {
     const cards = getCards();
     if(!cards.length) return;
 
-    // Cargar imágenes en un radio de 2 elementos
     for(let i = Math.max(0, index - 2); i <= Math.min(cards.length - 1, index + 2); i++) {
         const img = cards[i].querySelector('img[data-src]');
         if(img && img.dataset.src && !img.classList.contains('loaded')) {
@@ -251,7 +288,6 @@ function calculateGridColumns() {
         return;
     }
 
-    // Método simple: contar elementos en la primera fila
     const firstCard = grid.children[0];
     const firstRect = firstCard.getBoundingClientRect();
     let cols = 1;
@@ -273,18 +309,14 @@ function setFocusHeader(index) {
     if(index < 0) index = 0;
     if(index >= S.headerElements.length) index = S.headerElements.length - 1;
 
-    // Remover focus anterior
     if(S.focus && S.focus.classList) S.focus.classList.remove('f');
 
-    // Actualizar estado
     S.headerIndex = index;
     S.focus = S.headerElements[index];
-    S.currentIndex = -1; // Resetear índice de grid
+    S.currentIndex = -1;
 
-    // Aplicar focus
     S.focus.classList.add('f');
 
-    // Focus nativo para input
     if(S.focus === el.srch) {
         el.srch.focus();
     } else {
@@ -297,18 +329,14 @@ function setFocusGrid(index) {
     if(index < 0) index = 0;
     if(index >= cards.length) index = cards.length - 1;
 
-    // Remover focus anterior
     if(S.focus && S.focus.classList) S.focus.classList.remove('f');
 
-    // Actualizar estado
     S.currentIndex = index;
     S.focus = cards[index];
-    S.headerIndex = -1; // Resetear índice de header
+    S.headerIndex = -1;
 
-    // Aplicar focus
     cards[index].classList.add('f');
 
-    // Scroll suave
     const card = cards[index];
     const mainRect = el.main.getBoundingClientRect();
     const cardRect = card.getBoundingClientRect();
@@ -317,7 +345,6 @@ function setFocusGrid(index) {
         card.scrollIntoView({block: 'nearest', behavior: 'smooth'});
     }
 
-    // Pre-cargar imágenes adyacentes
     preloadAdjacentImages(index);
 }
 
@@ -330,7 +357,6 @@ function navigateGrid(direction) {
     switch(direction) {
         case 'up':
             if(S.currentIndex < S.gridCols) {
-                // Ir al header (botón mix)
                 setFocusHeader(2);
                 return true;
             }
@@ -341,7 +367,6 @@ function navigateGrid(direction) {
             break;
         case 'left':
             if(S.currentIndex % S.gridCols === 0) {
-                // Primera columna, ir al header (search)
                 setFocusHeader(1);
                 return true;
             }
@@ -349,7 +374,6 @@ function navigateGrid(direction) {
             break;
         case 'right':
             if((S.currentIndex + 1) % S.gridCols === 0 || S.currentIndex === cards.length - 1) {
-                // Última columna, no hacer nada o loop
                 return false;
             }
             newIndex = Math.min(cards.length - 1, S.currentIndex + 1);
@@ -375,7 +399,6 @@ function navigateHeader(direction) {
             newIndex = Math.min(S.headerElements.length - 1, S.headerIndex + 1);
             break;
         case 'down':
-            // Ir a la primera card del grid
             const cards = getCards();
             if(cards.length > 0) {
                 setFocusGrid(0);
@@ -383,7 +406,6 @@ function navigateHeader(direction) {
             }
             break;
         case 'up':
-            // No hay nada arriba del header
             return false;
     }
 
@@ -399,7 +421,6 @@ function navigateHeader(direction) {
 document.onkeydown = e => {
     const k = e.key;
 
-    // Prevenir comportamiento por defecto para teclas de navegación
     if(['ArrowUp','ArrowDown','ArrowLeft','ArrowRight','Enter',' ','Escape','Backspace','Tab'].includes(k)){
         e.preventDefault();
         e.stopPropagation();
@@ -410,14 +431,11 @@ document.onkeydown = e => {
         return;
     }
 
-    // Evitar que Tab cambie el focus
     if(k === 'Tab') {
         e.preventDefault();
         if(S.focus === el.srch) {
-            // Si estamos en search, ir al siguiente elemento del header
             navigateHeader('right');
         } else {
-            // Por defecto, ir al primer elemento del header
             setFocusHeader(0);
         }
         return;
@@ -427,14 +445,11 @@ document.onkeydown = e => {
 };
 
 function nav(k) {
-    // Activar elemento seleccionado
     if(k === 'Enter' || k === ' ') {
         if(S.focus === el.logo) {
-            // Recargar página
-            location.reload();
+            selectYear(null);
         } else if(S.focus === el.srch) {
             el.srch.focus();
-            // Si hay texto, ejecutar búsqueda
             if(el.srch.value.trim()) {
                 loadMovies(false);
             }
@@ -447,63 +462,52 @@ function nav(k) {
         return;
     }
 
-    // Escape para limpiar búsqueda
     if(k === 'Escape') {
         if(el.srch.value.trim()) {
             el.srch.value = '';
             loadMovies(false);
+        } else if(S.selectedYear) {
+            selectYear(null);
         } else if(S.currentIndex >= 0) {
-            // Si estamos en el grid, ir al header
-            setFocusHeader(2); // Ir al botón mix
-        }
-        return;
-    }
-
-    // Backspace
-    if(k === 'Backspace') {
-        if(S.focus === el.srch && el.srch.value.length > 0) {
-            // Permitir borrar en el input
-            return;
-        } else if(S.currentIndex >= 0) {
-            // Si estamos en el grid, ir al header
             setFocusHeader(2);
         }
         return;
     }
 
-    // Navegación con flechas
+    if(k === 'Backspace') {
+        if(S.focus === el.srch && el.srch.value.length > 0) {
+            return;
+        } else if(S.currentIndex >= 0) {
+            setFocusHeader(2);
+        }
+        return;
+    }
+
     if(['ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(k)) {
         const direction = k.toLowerCase().replace('arrow', '');
 
         if(S.currentIndex >= 0) {
-            // Estamos en el grid
             if(!navigateGrid(direction) && direction === 'right') {
-                // Si no se pudo navegar en el grid y es derecha, ir al header
                 setFocusHeader(0);
             }
         } else if(S.headerIndex >= 0) {
-            // Estamos en el header
             if(!navigateHeader(direction) && direction === 'left' && S.headerIndex === 0) {
-                // Si estamos en el logo y vamos a la izquierda, loop al final del grid
                 const cards = getCards();
                 if(cards.length > 0) {
                     setFocusGrid(cards.length - 1);
                 }
             }
         } else {
-            // Sin focus, empezar en el header
             setFocusHeader(0);
         }
     }
 }
 
-// Eventos de focus para elementos del header
 el.logo.addEventListener('focus', () => setFocusHeader(0));
 el.srch.addEventListener('focus', () => setFocusHeader(1));
 el.mix.addEventListener('focus', () => setFocusHeader(2));
 
-// Clic en logo para recargar
-el.logo.addEventListener('click', () => location.reload());
+el.logo.addEventListener('click', () => { selectYear(null); });
 
 // ===== BÚSQUEDA Y CARGA DE PELÍCULAS =====
 let searchTimer;
@@ -517,31 +521,33 @@ el.mix.onclick = () => loadMovies(true);
 function loadMovies(random) {
     el.grid.innerHTML = '<div class="msg load">Cargando</div>';
     const q = el.srch.value.trim();
-    fetch('/api/movies?limit=200' + (q ? '&q=' + encodeURIComponent(q) : '') + (random ? '&random=true' : ''))
+    let url = '/api/movies?limit=200';
+    if (q) url += '&q=' + encodeURIComponent(q);
+    if (random) url += '&random=true';
+    if (S.selectedYear) url += '&year=' + encodeURIComponent(S.selectedYear);
+
+    fetch(url)
         .then(r => r.json())
         .then(d => {
+            el.stats.textContent = d.total + ' películas' + (S.selectedYear ? ' · ' + S.selectedYear : '');
             el.grid.innerHTML = '';
             S.movies = d.data;
             S.currentIndex = -1;
 
-            // Crear cards con animación escalonada
             d.data.forEach((m, i) => {
                 setTimeout(() => {
                     el.grid.appendChild(mkCard(m));
-                }, i * 10); // Pequeño delay para animación escalonada
+                }, i * 10);
             });
 
-            // Calcular columnas y reinicializar lazy loading
             setTimeout(() => {
                 calculateGridColumns();
                 initLazyLoading();
 
-                // Enfocar primera card si hay resultados
                 const cards = getCards();
                 if(cards.length > 0) {
                     setFocusGrid(0);
                 } else {
-                    // Si no hay resultados, mantener focus en search
                     setFocusHeader(1);
                 }
             }, 100);
@@ -569,7 +575,7 @@ function mkCard(m) {
     return d;
 }
 
-// ===== REPRODUCTOR (sin cambios mayores) =====
+// ===== REPRODUCTOR =====
 function play(m) {
     S.lastFocus = S.focus;
     S.view = 'player';
@@ -603,7 +609,6 @@ function closeP() {
     S.view = 'home';
 
     setTimeout(() => {
-        // Restaurar focus a donde estaba
         if(S.lastFocus && S.lastFocus.classList) {
             if(S.lastFocus.classList.contains('card')) {
                 const cards = getCards();
@@ -614,7 +619,6 @@ function closeP() {
                     setFocusHeader(0);
                 }
             } else {
-                // Es un elemento del header
                 const idx = S.headerElements.indexOf(S.lastFocus);
                 if(idx >= 0) {
                     setFocusHeader(idx);
@@ -767,7 +771,6 @@ function fmt(s) {
     return h ? h + ':' + String(m).padStart(2, '0') + ':' + String(ss).padStart(2, '0') : m + ':' + String(ss).padStart(2, '0');
 }
 
-// Eventos del reproductor
 el.pPp.onclick = toggle;
 el.pRw.onclick = () => seek(-10);
 el.pFw.onclick = () => seek(10);
@@ -810,10 +813,8 @@ function esc(s) {
     })[c]) : '';
 }
 
-// Iniciar aplicación
 init();
 
-// Recalcular columnas al redimensionar
 let resizeTimer;
 window.addEventListener('resize', () => {
     clearTimeout(resizeTimer);
