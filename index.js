@@ -30,20 +30,38 @@ app.get('/api/movies', (req, res) => {
     res.json({ total: list.length, hasMore: start + +limit < list.length, data: list.slice(start, start + +limit) });
 });
 
+// Proxy de video optimizado con mejor manejo de buffer
 app.get('/video-proxy', (req, res) => {
     const url = req.query.url;
     if (!url) return res.status(400).end();
     let parsed;
     try { parsed = new URL(decodeURIComponent(url)); } catch { return res.status(400).end(); }
     const client = parsed.protocol === 'https:' ? https : http;
-    const headers = { 'User-Agent': 'Mozilla/5.0', 'Accept': '*/*', 'Accept-Encoding': 'identity', 'Referer': parsed.origin + '/' };
+    const headers = { 
+        'User-Agent': 'Mozilla/5.0', 
+        'Accept': '*/*', 
+        'Accept-Encoding': 'identity',
+        'Referer': parsed.origin + '/',
+        'Connection': 'keep-alive'
+    };
     if (req.headers.range) headers['Range'] = req.headers.range;
-    const proxyReq = client.request({ hostname: parsed.hostname, port: parsed.port || (parsed.protocol === 'https:' ? 443 : 80), path: parsed.pathname + parsed.search, headers, timeout: 30000 }, proxyRes => {
+    
+    const proxyReq = client.request({ 
+        hostname: parsed.hostname, 
+        port: parsed.port || (parsed.protocol === 'https:' ? 443 : 80), 
+        path: parsed.pathname + parsed.search, 
+        headers, 
+        timeout: 60000 // Aumentado a 60 segundos
+    }, proxyRes => {
         if ([301, 302, 307, 308].includes(proxyRes.statusCode) && proxyRes.headers.location) {
             proxyRes.destroy();
             return res.redirect(307, '/video-proxy?url=' + encodeURIComponent(proxyRes.headers.location));
         }
-        const h = { 'Content-Type': proxyRes.headers['content-type'] || 'video/mp4', 'Accept-Ranges': 'bytes' };
+        const h = { 
+            'Content-Type': proxyRes.headers['content-type'] || 'video/mp4', 
+            'Accept-Ranges': 'bytes',
+            'Cache-Control': 'no-cache'
+        };
         if (proxyRes.headers['content-length']) h['Content-Length'] = proxyRes.headers['content-length'];
         if (proxyRes.headers['content-range']) h['Content-Range'] = proxyRes.headers['content-range'];
         res.writeHead(proxyRes.statusCode, h);
@@ -93,8 +111,8 @@ video{flex:1;width:100%;background:#000}
 .p-prog{display:flex;align-items:center;gap:10px;margin-bottom:12px}
 .p-time{font-size:12px;min-width:45px}
 .p-bar{flex:1;height:5px;background:#444;border-radius:3px;position:relative;cursor:pointer}
-.p-bar-fill{position:absolute;left:0;top:0;height:100%;background:var(--p);border-radius:3px}
-.p-bar-buf{position:absolute;left:0;top:0;height:100%;background:#666;border-radius:3px;z-index:-1}
+.p-bar-fill{position:absolute;left:0;top:0;height:100%;background:var(--p);border-radius:3px;transition:width 0.1s linear}
+.p-bar-buf{position:absolute;left:0;top:0;height:100%;background:#666;border-radius:3px;z-index:-1;transition:width 0.1s linear}
 .p-ctrl{display:flex;justify-content:center;gap:10px}
 .p-btn{width:44px;height:44px;background:rgba(255,255,255,.1);border:none;border-radius:50%;color:#fff;font-size:13px;font-weight:700;cursor:pointer;transition:background 0.2s}
 .p-btn:hover,.p-btn:active,.p-btn.f{background:var(--p);color:#000}
@@ -115,7 +133,7 @@ video{flex:1;width:100%;background:#000}
 </div>
 <div class="main" id="main"><div class="grid" id="grid"><div class="msg load">Cargando</div></div></div>
 <div class="player" id="player">
-<video id="vid" playsinline webkit-playsinline></video>
+<video id="vid" playsinline webkit-playsinline preload="auto"></video>
 <div class="p-load" id="pLoad"><div class="p-spin"></div><div id="pLoadTxt">Cargando...</div></div>
 <div class="p-err" id="pErr"><div>Error</div><div style="font-size:11px;color:#888;margin:8px 0" id="pErrTxt"></div><button class="btn" id="pRetry">Reintentar</button> <button class="btn" id="pBack">Volver</button></div>
 <div class="p-center" id="pInd"></div>
@@ -150,6 +168,10 @@ window.onpopstate=()=>{if(S.view==='player'){closeP();history.pushState({v:'home
 function init() {
     // Configurar elementos del header
     S.headerElements = [el.logo, el.srch, el.mix];
+
+    // Configurar el video para mejor reproducción
+    el.vid.preload = 'auto';
+    el.vid.buffer = true;
 
     fetch('/api/movies?limit=200&random=true').then(r=>r.json()).then(d=>{
         el.stats.textContent=d.total+' películas';
@@ -586,7 +608,10 @@ function mkCard(m) {
     return d;
 }
 
-// ===== REPRODUCTOR SIN PANTALLA NEGRA =====
+// ===== REPRODUCTOR OPTIMIZADO PARA EVITAR CONGELAMIENTOS =====
+let bufferCheckInterval = null;
+let isBuffering = false;
+
 function play(m) {
     S.lastFocus = S.focus;
     S.view = 'player';
@@ -597,10 +622,15 @@ function play(m) {
     el.pLoadTxt.textContent = 'Conectando...';
     el.pTitle.textContent = m.title;
     el.player.classList.add('open');
+    
+    // Detener cualquier reproducción anterior
     el.vid.pause();
     el.vid.removeAttribute('src');
     el.vid.load();
-
+    
+    // Configurar buffer para reproducción fluida
+    el.vid.preload = 'auto';
+    
     // Iniciar reproducción inmediatamente
     let u = m.url;
     if(u.startsWith('http://') || location.protocol === 'https:') {
@@ -611,9 +641,58 @@ function play(m) {
     // Intentar reproducir inmediatamente
     el.vid.play().catch(playErr);
     showUI();
+    
+    // Iniciar monitoreo de buffer
+    startBufferMonitoring();
+}
+
+function startBufferMonitoring() {
+    if (bufferCheckInterval) {
+        clearInterval(bufferCheckInterval);
+    }
+    
+    bufferCheckInterval = setInterval(() => {
+        if (!S.playing) return;
+        
+        try {
+            const buffered = el.vid.buffered;
+            const currentTime = el.vid.currentTime;
+            const duration = el.vid.duration;
+            
+            if (buffered.length > 0 && duration > 0) {
+                // Verificar si tenemos suficiente buffer
+                const bufferedEnd = buffered.end(buffered.length - 1);
+                const bufferAhead = bufferedEnd - currentTime;
+                
+                // Si el buffer es menor a 2 segundos, mostrar carga
+                if (bufferAhead < 2 && !el.vid.paused) {
+                    if (!isBuffering) {
+                        isBuffering = true;
+                        el.pLoad.classList.add('show');
+                        el.pLoadTxt.textContent = 'Buffering...';
+                    }
+                } else if (bufferAhead >= 2 && isBuffering) {
+                    isBuffering = false;
+                    el.pLoad.classList.remove('show');
+                }
+                
+                // Actualizar barra de buffer
+                el.pBuf.style.width = (bufferedEnd / duration * 100) + '%';
+            }
+        } catch (e) {
+            // Ignorar errores de buffer
+        }
+    }, 500);
 }
 
 function closeP() {
+    // Detener monitoreo de buffer
+    if (bufferCheckInterval) {
+        clearInterval(bufferCheckInterval);
+        bufferCheckInterval = null;
+    }
+    isBuffering = false;
+    
     el.vid.pause();
     el.vid.removeAttribute('src');
     el.vid.load();
@@ -642,7 +721,7 @@ function closeP() {
         } else {
             setFocusHeader(0);
         }
-    }, 10); // Reducido de 20 a 10ms
+    }, 10);
 }
 
 el.vid.onloadstart = () => {
@@ -654,17 +733,26 @@ el.vid.onloadstart = () => {
 el.vid.oncanplay = () => {
     el.pLoad.classList.remove('show');
     S.retry = 0;
+    isBuffering = false;
+};
+
+el.vid.oncanplaythrough = () => {
+    // El video puede reproducirse completamente sin interrupciones
+    el.pLoad.classList.remove('show');
+    isBuffering = false;
 };
 
 el.vid.onwaiting = () => {
     el.pLoad.classList.add('show');
     el.pLoadTxt.textContent = 'Buffering...';
+    isBuffering = true;
 };
 
 el.vid.onplaying = () => {
     el.pLoad.classList.remove('show');
     S.playing = true;
     el.pPp.textContent = '⏸';
+    isBuffering = false;
 };
 
 el.vid.onpause = () => {
@@ -691,13 +779,14 @@ el.vid.onprogress = () => {
 el.vid.onerror = () => {
     const err = el.vid.error;
     el.pErrTxt.textContent = err ? ['','Abortado','Red','Decode','No soportado'][err.code] || 'Error' : 'Error';
-    if(err && err.code === 2 && S.retry < 2) {
+    if(err && err.code === 2 && S.retry < 3) { // Aumentado a 3 reintentos
         S.retry++;
-        el.pLoadTxt.textContent = 'Reintentando...';
-        setTimeout(retry, 1000);
+        el.pLoadTxt.textContent = 'Reintentando ' + S.retry + '/3...';
+        setTimeout(retry, 1000 * S.retry); // Backoff exponencial
     } else {
         el.pLoad.classList.remove('show');
         el.pErr.classList.add('show');
+        isBuffering = false;
     }
 };
 
@@ -705,26 +794,46 @@ el.vid.onended = () => {
     S.playing = false;
     el.pPp.textContent = '▶';
     showUI();
+    if (bufferCheckInterval) {
+        clearInterval(bufferCheckInterval);
+        bufferCheckInterval = null;
+    }
 };
 
 function playErr(e) {
-    if(e.name === 'NotAllowedError') showUI();
-    else if(e.name === 'NotSupportedError') {
+    if(e.name === 'NotAllowedError') {
+        showUI();
+        el.pLoad.classList.remove('show');
+    } else if(e.name === 'NotSupportedError') {
         el.pErrTxt.textContent = 'No soportado';
         el.pErr.classList.add('show');
         el.pLoad.classList.remove('show');
+    } else if (e.name === 'AbortError') {
+        // Ignorar errores de aborto
+    } else {
+        // Otros errores, reintentar
+        if (S.retry < 3) {
+            S.retry++;
+            el.pLoadTxt.textContent = 'Reintentando ' + S.retry + '/3...';
+            setTimeout(retry, 1000 * S.retry);
+        }
     }
 }
 
 function retry() {
     el.pErr.classList.remove('show');
     el.pLoad.classList.add('show');
+    el.pLoadTxt.textContent = 'Reintentando...';
     const t = el.vid.currentTime || 0;
     el.vid.pause();
     el.vid.load();
     setTimeout(() => {
-        el.vid.currentTime = t;
-        el.vid.play().catch(playErr);
+        // Mantener la misma URL
+        const currentSrc = el.vid.src;
+        if (currentSrc) {
+            el.vid.currentTime = t;
+            el.vid.play().catch(playErr);
+        }
     }, 200);
 }
 
@@ -742,9 +851,15 @@ function toggle() {
     if(el.vid.paused) {
         el.vid.play().catch(playErr);
         showInd('▶');
+        // Reiniciar monitoreo de buffer
+        startBufferMonitoring();
     } else {
         el.vid.pause();
         showInd('⏸');
+        if (bufferCheckInterval) {
+            clearInterval(bufferCheckInterval);
+            bufferCheckInterval = null;
+        }
     }
 }
 
@@ -836,11 +951,11 @@ window.addEventListener('resize', () => {
     clearTimeout(resizeTimer);
     resizeTimer = setTimeout(() => {
         calculateGridColumns();
-    }, 50); // Reducido de 100 a 50ms
+    }, 50);
 });
 
 // Actualizar cache de cards periódicamente
-setInterval(refreshCardCache, 500); // Reducido de 1000 a 500ms
+setInterval(refreshCardCache, 500);
 })();
 </script></body></html>`));
 
