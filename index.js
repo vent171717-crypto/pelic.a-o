@@ -1,17 +1,63 @@
-const express = require('express');const path = require('path');const fs = require('fs');const http = require('http');const https = require('https');
+const express = require('express');
+const path = require('path');
+const fs = require('fs');
+const http = require('http');
+const https = require('https');
 
-const app = express();const PORT = process.env.PORT || 3000;let MOVIES = [];
+const app = express();
+const PORT = process.env.PORT || 3000;
+let MOVIES = [];
 
-try {const data = JSON.parse(fs.readFileSync(path.join(__dirname, process.env.DATA_FILE || 'data.json'), 'utf8'));MOVIES = data.map((m, i) => ({ id: i, title: m.title || 'Sin título', poster: m.logo || '', url: m.url || '' }));console.log(✓ ${MOVIES.length} películas);} catch (e) { console.error('Error:', e.message); }
+try {
+    const data = JSON.parse(fs.readFileSync(path.join(__dirname, process.env.DATA_FILE || 'data.json'), 'utf8'));
+    MOVIES = data.map((m, i) => ({ id: i, title: m.title || 'Sin título', poster: m.logo || '', url: m.url || '' }));
+    console.log(`✓ ${MOVIES.length} películas`);
+} catch (e) { console.error('Error:', e.message); }
 
-app.use((req, res, next) => {res.setHeader('Access-Control-Allow-Origin', '*');res.setHeader('Access-Control-Allow-Headers', 'Range');res.setHeader('Access-Control-Expose-Headers', 'Content-Range,Accept-Ranges,Content-Length');if (req.method === 'OPTIONS') return res.sendStatus(204);next();});
+app.use((req, res, next) => {
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Access-Control-Allow-Headers', 'Range');
+    res.setHeader('Access-Control-Expose-Headers', 'Content-Range,Accept-Ranges,Content-Length');
+    if (req.method === 'OPTIONS') return res.sendStatus(204);
+    next();
+});
 
-app.get('/api/movies', (req, res) => {const { page = 0, limit = 200, q = '', random } = req.query;let list = q ? MOVIES.filter(m => m.title.toLowerCase().includes(q.toLowerCase())) : [...MOVIES];if (random === 'true') list.sort(() => Math.random() - 0.5);const start = page * limit;res.json({ total: list.length, hasMore: start + +limit < list.length, data: list.slice(start, start + +limit) });});
+app.get('/api/movies', (req, res) => {
+    const { page = 0, limit = 200, q = '', random } = req.query;
+    let list = q ? MOVIES.filter(m => m.title.toLowerCase().includes(q.toLowerCase())) : [...MOVIES];
+    if (random === 'true') list.sort(() => Math.random() - 0.5);
+    const start = page * limit;
+    res.json({ total: list.length, hasMore: start + +limit < list.length, data: list.slice(start, start + +limit) });
+});
 
-app.get('/video-proxy', (req, res) => {const url = req.query.url;if (!url) return res.status(400).end();let parsed;try { parsed = new URL(decodeURIComponent(url)); } catch { return res.status(400).end(); }const client = parsed.protocol === 'https:' ? https : http;const headers = { 'User-Agent': 'Mozilla/5.0', 'Accept': '/', 'Accept-Encoding': 'identity', 'Referer': parsed.origin + '/' };if (req.headers.range) headers['Range'] = req.headers.range;const proxyReq = client.request({ hostname: parsed.hostname, port: parsed.port || (parsed.protocol === 'https:' ? 443 : 80), path: parsed.pathname + parsed.search, headers, timeout: 30000 }, proxyRes => {if ([301, 302, 307, 308].includes(proxyRes.statusCode) && proxyRes.headers.location) {proxyRes.destroy();return res.redirect(307, '/video-proxy?url=' + encodeURIComponent(proxyRes.headers.location));}const h = { 'Content-Type': proxyRes.headers['content-type'] || 'video/mp4', 'Accept-Ranges': 'bytes' };if (proxyRes.headers['content-length']) h['Content-Length'] = proxyRes.headers['content-length'];if (proxyRes.headers['content-range']) h['Content-Range'] = proxyRes.headers['content-range'];res.writeHead(proxyRes.statusCode, h);proxyRes.pipe(res);proxyRes.on('error', () => res.end());});proxyReq.on('error', () => !res.headersSent && res.status(502).end());proxyReq.on('timeout', () => { proxyReq.destroy(); !res.headersSent && res.status(504).end(); });req.on('close', () => proxyReq.destroy());proxyReq.end();});
+app.get('/video-proxy', (req, res) => {
+    const url = req.query.url;
+    if (!url) return res.status(400).end();
+    let parsed;
+    try { parsed = new URL(decodeURIComponent(url)); } catch { return res.status(400).end(); }
+    const client = parsed.protocol === 'https:' ? https : http;
+    const headers = { 'User-Agent': 'Mozilla/5.0', 'Accept': '*/*', 'Accept-Encoding': 'identity', 'Referer': parsed.origin + '/' };
+    if (req.headers.range) headers['Range'] = req.headers.range;
+    const proxyReq = client.request({ hostname: parsed.hostname, port: parsed.port || (parsed.protocol === 'https:' ? 443 : 80), path: parsed.pathname + parsed.search, headers, timeout: 30000 }, proxyRes => {
+        if ([301, 302, 307, 308].includes(proxyRes.statusCode) && proxyRes.headers.location) {
+            proxyRes.destroy();
+            return res.redirect(307, '/video-proxy?url=' + encodeURIComponent(proxyRes.headers.location));
+        }
+        const h = { 'Content-Type': proxyRes.headers['content-type'] || 'video/mp4', 'Accept-Ranges': 'bytes' };
+        if (proxyRes.headers['content-length']) h['Content-Length'] = proxyRes.headers['content-length'];
+        if (proxyRes.headers['content-range']) h['Content-Range'] = proxyRes.headers['content-range'];
+        res.writeHead(proxyRes.statusCode, h);
+        proxyRes.pipe(res);
+        proxyRes.on('error', () => res.end());
+    });
+    proxyReq.on('error', () => !res.headersSent && res.status(502).end());
+    proxyReq.on('timeout', () => { proxyReq.destroy(); !res.headersSent && res.status(504).end(); });
+    req.on('close', () => proxyReq.destroy());
+    proxyReq.end();
+});
 
-app.get('/', (req, res) => res.send(`<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
-
+app.get('/', (req, res) => res.send(`<!DOCTYPE html><html lang="es"><head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
 <title>Movies+</title><style>
 *{margin:0;padding:0;box-sizing:border-box;user-select:none;-webkit-tap-highlight-color:transparent}
 :root{--p:#f5c518;--bg:#0a0a0a;--s:#161616;--c:#1a1a1a;--b:#2a2a2a;--t:#e0e0e0;--t2:#888}
@@ -90,469 +136,692 @@ const el={
     pFw:$('pFw'), pRetry:$('pRetry'), pBack:$('pBack')
 };
 
-const S={view:'home', movies:[], focus, lastFocus, playing, retry:0,imgObserver, gridCols:0, currentIndex:-1,headerElements:[], // Logo, Search, Mix - en orden de navegaciónheaderIndex:0 // Índice actual en el header};
-
-// ===== INICIALIZACIÓN =====history.replaceState({v:'home'},'','#home');window.onpopstate=()=>{if(S.view==='player'){closeP();history.pushState({v:'home'},'','#home')}};
-
-function init() {// Configurar elementos del headerS.headerElements = [el.logo, el.srch, el.mix];
-
-fetch('/api/movies?limit=200&random=true').then(r=>r.json()).then(d=>{
-    el.stats.textContent=d.total+' películas';
-    el.grid.innerHTML='';
-    S.movies=d.data;
-    d.data.forEach(m=>el.grid.appendChild(mkCard(m)));
-
-    // Calcular columnas del grid
-    calculateGridColumns();
-
-    // Inicializar lazy loading
-    initLazyLoading();
-
-    // Enfocar logo inicialmente
-    setFocusHeader(0);
-
-}).catch(()=>el.grid.innerHTML='<div class="msg">Error</div>');
-
-}
-
-// ===== LAZY LOADING CON ANIMACIÓN SUAVE =====function initLazyLoading() {if(S.imgObserver) S.imgObserver.disconnect();
-
-S.imgObserver = new IntersectionObserver((entries) => {
-    entries.forEach(entry => {
-        if(entry.isIntersecting){
-            const img = entry.target;
-            if(img.dataset.src && !img.classList.contains('loaded')) {
-                loadImageWithAnimation(img);
-            }
-            S.imgObserver.unobserve(img);
-        }
-    });
-}, {
-    rootMargin: '300px 0px', // Cargar antes de que entren al viewport
-    threshold: 0.01
-});
-
-// Observar todas las imágenes
-document.querySelectorAll('.card img[data-src]').forEach(img => {
-    S.imgObserver.observe(img);
-});
-
-}
-
-function loadImageWithAnimation(img) {if(!img.dataset.src) return;
-
-const src = img.dataset.src;
-const imgEl = new Image();
-
-imgEl.onload = () => {
-    img.src = src;
-    // Forzar reflow para activar la animación
-    void img.offsetWidth;
-    img.classList.add('loaded');
-    img.style.background = 'none';
+const S={
+    view:'home', movies:[], focus:null, lastFocus:null, playing:false, retry:0,
+    imgObserver:null, gridCols:0, currentIndex:-1,
+    headerElements:[], // Logo, Search, Mix - en orden de navegación
+    headerIndex:0 // Índice actual en el header
 };
 
-imgEl.onerror = () => {
-    // Usar placeholder SVG con animación
-    img.src = 'data:image/svg+xml;base64,' + btoa(
-        '<svg xmlns="http://www.w3.org/2000/svg" width="130" height="195" viewBox="0 0 130 195">' +
-        '<rect width="130" height="195" fill="#1a1a1a"/>' +
-        '<text x="65" y="95" font-family="Arial" font-size="12" fill="#888" text-anchor="middle">Sin imagen</text>' +
-        '</svg>'
-    );
-    img.classList.add('loaded');
-    img.style.background = 'none';
-};
+// ===== INICIALIZACIÓN =====
+history.replaceState({v:'home'},'','#home');
+window.onpopstate=()=>{if(S.view==='player'){closeP();history.pushState({v:'home'},'','#home')}};
 
-// Pequeño delay para mostrar la animación de carga
-setTimeout(() => {
-    imgEl.src = src;
-}, 100);
+function init() {
+    // Configurar elementos del header
+    S.headerElements = [el.logo, el.srch, el.mix];
 
-}
+    fetch('/api/movies?limit=200&random=true').then(r=>r.json()).then(d=>{
+        el.stats.textContent=d.total+' películas';
+        el.grid.innerHTML='';
+        S.movies=d.data;
+        d.data.forEach(m=>el.grid.appendChild(mkCard(m)));
 
-function preloadAdjacentImages(index) {const cards = getCards();if(!cards.length) return;
+        // Calcular columnas del grid
+        calculateGridColumns();
 
-// Cargar imágenes en un radio de 2 elementos
-for(let i = Math.max(0, index - 2); i <= Math.min(cards.length - 1, index + 2); i++) {
-    const img = cards[i].querySelector('img[data-src]');
-    if(img && img.dataset.src && !img.classList.contains('loaded')) {
-        loadImageWithAnimation(img);
-    }
-}
+        // Inicializar lazy loading
+        initLazyLoading();
 
-}
-
-// ===== SISTEMA DE NAVEGACIÓN UNIFICADO =====function getCards() {return [...el.grid.querySelectorAll('.card')];}
-
-function calculateGridColumns() {const grid = el.grid;if(!grid.children.length) {S.gridCols = 0;return;}
-
-// Método simple: contar elementos en la primera fila
-const firstCard = grid.children[0];
-const firstRect = firstCard.getBoundingClientRect();
-let cols = 1;
-
-for(let i = 1; i < grid.children.length; i++) {
-    const rect = grid.children[i].getBoundingClientRect();
-    if(Math.abs(rect.top - firstRect.top) < 10) {
-        cols++;
-    } else {
-        break;
-    }
-}
-
-S.gridCols = Math.max(1, cols);
-
-}
-
-// ===== MANEJO DE FOCUS =====function setFocusHeader(index) {if(index < 0) index = 0;if(index >= S.headerElements.length) index = S.headerElements.length - 1;
-
-// Remover focus anterior
-if(S.focus && S.focus.classList) S.focus.classList.remove('f');
-
-// Actualizar estado
-S.headerIndex = index;
-S.focus = S.headerElements[index];
-S.currentIndex = -1; // Resetear índice de grid
-
-// Aplicar focus
-S.focus.classList.add('f');
-
-// Focus nativo para input
-if(S.focus === el.srch) {
-    el.srch.focus();
-} else {
-    el.srch.blur();
-}
-
-}
-
-function setFocusGrid(index) {const cards = getCards();if(index < 0) index = 0;if(index >= cards.length) index = cards.length - 1;
-
-// Remover focus anterior
-if(S.focus && S.focus.classList) S.focus.classList.remove('f');
-
-// Actualizar estado
-S.currentIndex = index;
-S.focus = cards[index];
-S.headerIndex = -1; // Resetear índice de header
-
-// Aplicar focus
-cards[index].classList.add('f');
-
-// Scroll suave
-const card = cards[index];
-const mainRect = el.main.getBoundingClientRect();
-const cardRect = card.getBoundingClientRect();
-
-if(cardRect.top < mainRect.top || cardRect.bottom > mainRect.bottom) {
-    card.scrollIntoView({block: 'nearest', behavior: 'smooth'});
-}
-
-// Pre-cargar imágenes adyacentes
-preloadAdjacentImages(index);
-
-}
-
-function navigateGrid(direction) {const cards = getCards();if(!cards.length) return false;
-
-let newIndex = S.currentIndex;
-
-switch(direction) {
-    case 'up':
-        if(S.currentIndex < S.gridCols) {
-            // Ir al header (botón mix)
-            setFocusHeader(2);
-            return true;
-        }
-        newIndex = Math.max(0, S.currentIndex - S.gridCols);
-        break;
-    case 'down':
-        newIndex = Math.min(cards.length - 1, S.currentIndex + S.gridCols);
-        break;
-    case 'left':
-        if(S.currentIndex % S.gridCols === 0) {
-            // Primera columna, ir al header (search)
-            setFocusHeader(1);
-            return true;
-        }
-        newIndex = Math.max(0, S.currentIndex - 1);
-        break;
-    case 'right':
-        if((S.currentIndex + 1) % S.gridCols === 0 || S.currentIndex === cards.length - 1) {
-            // Última columna, no hacer nada o loop
-            return false;
-        }
-        newIndex = Math.min(cards.length - 1, S.currentIndex + 1);
-        break;
-}
-
-if(newIndex !== S.currentIndex) {
-    setFocusGrid(newIndex);
-    return true;
-}
-
-return false;
-
-}
-
-function navigateHeader(direction) {let newIndex = S.headerIndex;
-
-switch(direction) {
-    case 'left':
-        newIndex = Math.max(0, S.headerIndex - 1);
-        break;
-    case 'right':
-        newIndex = Math.min(S.headerElements.length - 1, S.headerIndex + 1);
-        break;
-    case 'down':
-        // Ir a la primera card del grid
-        const cards = getCards();
-        if(cards.length > 0) {
-            setFocusGrid(0);
-            return true;
-        }
-        break;
-    case 'up':
-        // No hay nada arriba del header
-        return false;
-}
-
-if(newIndex !== S.headerIndex) {
-    setFocusHeader(newIndex);
-    return true;
-}
-
-return false;
-
-}
-
-// ===== MANEJO DE TECLADO =====document.onkeydown = e => {const k = e.key;
-
-// Prevenir comportamiento por defecto para teclas de navegación
-if(['ArrowUp','ArrowDown','ArrowLeft','ArrowRight','Enter',' ','Escape','Backspace','Tab'].includes(k)){
-    e.preventDefault();
-    e.stopPropagation();
-}
-
-if(S.view === 'player'){
-    playerKey(k);
-    return;
-}
-
-// Evitar que Tab cambie el focus
-if(k === 'Tab') {
-    e.preventDefault();
-    if(S.focus === el.srch) {
-        // Si estamos en search, ir al siguiente elemento del header
-        navigateHeader('right');
-    } else {
-        // Por defecto, ir al primer elemento del header
+        // Enfocar logo inicialmente
         setFocusHeader(0);
-    }
-    return;
+
+    }).catch(()=>el.grid.innerHTML='<div class="msg">Error</div>');
 }
 
-nav(k);
+// ===== LAZY LOADING CON ANIMACIÓN SUAVE =====
+function initLazyLoading() {
+    if(S.imgObserver) S.imgObserver.disconnect();
 
-};
-
-function nav(k) {// Activar elemento seleccionadoif(k === 'Enter' || k === ' ') {if(S.focus === el.logo) {// Recargar páginalocation.reload();} else if(S.focus === el.srch) {el.srch.focus();// Si hay texto, ejecutar búsquedaif(el.srch.value.trim()) {loadMovies(false);}} else if(S.focus === el.mix) {loadMovies(true);} else if(S.focus && S.focus.classList.contains('card')) {const idx = [...el.grid.querySelectorAll('.card')].indexOf(S.focus);if(idx >= 0 && S.movies[idx]) play(S.movies[idx]);}return;}
-
-// Escape para limpiar búsqueda
-if(k === 'Escape') {
-    if(el.srch.value.trim()) {
-        el.srch.value = '';
-        loadMovies(false);
-    } else if(S.currentIndex >= 0) {
-        // Si estamos en el grid, ir al header
-        setFocusHeader(2); // Ir al botón mix
-    }
-    return;
-}
-
-// Backspace
-if(k === 'Backspace') {
-    if(S.focus === el.srch && el.srch.value.length > 0) {
-        // Permitir borrar en el input
-        return;
-    } else if(S.currentIndex >= 0) {
-        // Si estamos en el grid, ir al header
-        setFocusHeader(2);
-    }
-    return;
-}
-
-// Navegación con flechas
-if(['ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(k)) {
-    const direction = k.toLowerCase().replace('arrow', '');
-
-    if(S.currentIndex >= 0) {
-        // Estamos en el grid
-        if(!navigateGrid(direction) && direction === 'right') {
-            // Si no se pudo navegar en el grid y es derecha, ir al header
-            setFocusHeader(0);
-        }
-    } else if(S.headerIndex >= 0) {
-        // Estamos en el header
-        if(!navigateHeader(direction) && direction === 'left' && S.headerIndex === 0) {
-            // Si estamos en el logo y vamos a la izquierda, loop al final del grid
-            const cards = getCards();
-            if(cards.length > 0) {
-                setFocusGrid(cards.length - 1);
+    S.imgObserver = new IntersectionObserver((entries) => {
+        entries.forEach(entry => {
+            if(entry.isIntersecting){
+                const img = entry.target;
+                if(img.dataset.src && !img.classList.contains('loaded')) {
+                    loadImageWithAnimation(img);
+                }
+                S.imgObserver.unobserve(img);
             }
-        }
-    } else {
-        // Sin focus, empezar en el header
-        setFocusHeader(0);
-    }
-}
-
-}
-
-// Eventos de focus para elementos del headerel.logo.addEventListener('focus', () => setFocusHeader(0));el.srch.addEventListener('focus', () => setFocusHeader(1));el.mix.addEventListener('focus', () => setFocusHeader(2));
-
-// Clic en logo para recargarel.logo.addEventListener('click', () => location.reload());
-
-// ===== BÚSQUEDA Y CARGA DE PELÍCULAS =====let searchTimer;el.srch.oninput = () => {clearTimeout(searchTimer);searchTimer = setTimeout(() => loadMovies(false), 400);};
-
-el.mix.onclick = () => loadMovies(true);
-
-function loadMovies(random) {el.grid.innerHTML = '<div class="msg load">Cargando</div>';const q = el.srch.value.trim();fetch('/api/movies?limit=200' + (q ? '&q=' + encodeURIComponent(q) : '') + (random ? '&random=true' : '')).then(r => r.json()).then(d => {el.grid.innerHTML = '';S.movies = d.data;S.currentIndex = -1;
-
-        // Crear cards con animación escalonada
-        d.data.forEach((m, i) => {
-            setTimeout(() => {
-                el.grid.appendChild(mkCard(m));
-            }, i * 10); // Pequeño delay para animación escalonada
         });
+    }, {
+        rootMargin: '300px 0px', // Cargar antes de que entren al viewport
+        threshold: 0.01
+    });
 
-        // Calcular columnas y reinicializar lazy loading
-        setTimeout(() => {
-            calculateGridColumns();
-            initLazyLoading();
+    // Observar todas las imágenes
+    document.querySelectorAll('.card img[data-src]').forEach(img => {
+        S.imgObserver.observe(img);
+    });
+}
 
-            // Enfocar primera card si hay resultados
+function loadImageWithAnimation(img) {
+    if(!img.dataset.src) return;
+
+    const src = img.dataset.src;
+    const imgEl = new Image();
+
+    imgEl.onload = () => {
+        img.src = src;
+        // Forzar reflow para activar la animación
+        void img.offsetWidth;
+        img.classList.add('loaded');
+        img.style.background = 'none';
+    };
+
+    imgEl.onerror = () => {
+        // Usar placeholder SVG con animación
+        img.src = 'data:image/svg+xml;base64,' + btoa(
+            '<svg xmlns="http://www.w3.org/2000/svg" width="130" height="195" viewBox="0 0 130 195">' +
+            '<rect width="130" height="195" fill="#1a1a1a"/>' +
+            '<text x="65" y="95" font-family="Arial" font-size="12" fill="#888" text-anchor="middle">Sin imagen</text>' +
+            '</svg>'
+        );
+        img.classList.add('loaded');
+        img.style.background = 'none';
+    };
+
+    // Pequeño delay para mostrar la animación de carga
+    setTimeout(() => {
+        imgEl.src = src;
+    }, 100);
+}
+
+function preloadAdjacentImages(index) {
+    const cards = getCards();
+    if(!cards.length) return;
+
+    // Cargar imágenes en un radio de 2 elementos
+    for(let i = Math.max(0, index - 2); i <= Math.min(cards.length - 1, index + 2); i++) {
+        const img = cards[i].querySelector('img[data-src]');
+        if(img && img.dataset.src && !img.classList.contains('loaded')) {
+            loadImageWithAnimation(img);
+        }
+    }
+}
+
+// ===== SISTEMA DE NAVEGACIÓN UNIFICADO =====
+function getCards() {
+    return [...el.grid.querySelectorAll('.card')];
+}
+
+function calculateGridColumns() {
+    const grid = el.grid;
+    if(!grid.children.length) {
+        S.gridCols = 0;
+        return;
+    }
+
+    // Método simple: contar elementos en la primera fila
+    const firstCard = grid.children[0];
+    const firstRect = firstCard.getBoundingClientRect();
+    let cols = 1;
+
+    for(let i = 1; i < grid.children.length; i++) {
+        const rect = grid.children[i].getBoundingClientRect();
+        if(Math.abs(rect.top - firstRect.top) < 10) {
+            cols++;
+        } else {
+            break;
+        }
+    }
+
+    S.gridCols = Math.max(1, cols);
+}
+
+// ===== MANEJO DE FOCUS =====
+function setFocusHeader(index) {
+    if(index < 0) index = 0;
+    if(index >= S.headerElements.length) index = S.headerElements.length - 1;
+
+    // Remover focus anterior
+    if(S.focus && S.focus.classList) S.focus.classList.remove('f');
+
+    // Actualizar estado
+    S.headerIndex = index;
+    S.focus = S.headerElements[index];
+    S.currentIndex = -1; // Resetear índice de grid
+
+    // Aplicar focus
+    S.focus.classList.add('f');
+
+    // Focus nativo para input
+    if(S.focus === el.srch) {
+        el.srch.focus();
+    } else {
+        el.srch.blur();
+    }
+}
+
+function setFocusGrid(index) {
+    const cards = getCards();
+    if(index < 0) index = 0;
+    if(index >= cards.length) index = cards.length - 1;
+
+    // Remover focus anterior
+    if(S.focus && S.focus.classList) S.focus.classList.remove('f');
+
+    // Actualizar estado
+    S.currentIndex = index;
+    S.focus = cards[index];
+    S.headerIndex = -1; // Resetear índice de header
+
+    // Aplicar focus
+    cards[index].classList.add('f');
+
+    // Scroll suave
+    const card = cards[index];
+    const mainRect = el.main.getBoundingClientRect();
+    const cardRect = card.getBoundingClientRect();
+
+    if(cardRect.top < mainRect.top || cardRect.bottom > mainRect.bottom) {
+        card.scrollIntoView({block: 'nearest', behavior: 'smooth'});
+    }
+
+    // Pre-cargar imágenes adyacentes
+    preloadAdjacentImages(index);
+}
+
+function navigateGrid(direction) {
+    const cards = getCards();
+    if(!cards.length) return false;
+
+    let newIndex = S.currentIndex;
+
+    switch(direction) {
+        case 'up':
+            if(S.currentIndex < S.gridCols) {
+                // Ir al header (botón mix)
+                setFocusHeader(2);
+                return true;
+            }
+            newIndex = Math.max(0, S.currentIndex - S.gridCols);
+            break;
+        case 'down':
+            newIndex = Math.min(cards.length - 1, S.currentIndex + S.gridCols);
+            break;
+        case 'left':
+            if(S.currentIndex % S.gridCols === 0) {
+                // Primera columna, ir al header (search)
+                setFocusHeader(1);
+                return true;
+            }
+            newIndex = Math.max(0, S.currentIndex - 1);
+            break;
+        case 'right':
+            if((S.currentIndex + 1) % S.gridCols === 0 || S.currentIndex === cards.length - 1) {
+                // Última columna, no hacer nada o loop
+                return false;
+            }
+            newIndex = Math.min(cards.length - 1, S.currentIndex + 1);
+            break;
+    }
+
+    if(newIndex !== S.currentIndex) {
+        setFocusGrid(newIndex);
+        return true;
+    }
+
+    return false;
+}
+
+function navigateHeader(direction) {
+    let newIndex = S.headerIndex;
+
+    switch(direction) {
+        case 'left':
+            newIndex = Math.max(0, S.headerIndex - 1);
+            break;
+        case 'right':
+            newIndex = Math.min(S.headerElements.length - 1, S.headerIndex + 1);
+            break;
+        case 'down':
+            // Ir a la primera card del grid
             const cards = getCards();
             if(cards.length > 0) {
                 setFocusGrid(0);
-            } else {
-                // Si no hay resultados, mantener focus en search
-                setFocusHeader(1);
+                return true;
             }
-        }, 100);
-    })
-    .catch(() => {
-        el.grid.innerHTML = '<div class="msg">Error al cargar</div>';
-        setFocusHeader(1);
-    });
+            break;
+        case 'up':
+            // No hay nada arriba del header
+            return false;
+    }
 
+    if(newIndex !== S.headerIndex) {
+        setFocusHeader(newIndex);
+        return true;
+    }
+
+    return false;
 }
 
-function mkCard(m) {const d = document.createElement('div');d.className = 'card';d.tabIndex = -1;
+// ===== MANEJO DE TECLADO =====
+document.onkeydown = e => {
+    const k = e.key;
 
-const posterSrc = m.poster || '';
-d.innerHTML = '<img data-src="' + esc(posterSrc) + '" alt="' + esc(m.title) + '">' +
-              '<div class="card-t">' + esc(m.title) + '</div>';
+    // Prevenir comportamiento por defecto para teclas de navegación
+    if(['ArrowUp','ArrowDown','ArrowLeft','ArrowRight','Enter',' ','Escape','Backspace','Tab'].includes(k)){
+        e.preventDefault();
+        e.stopPropagation();
+    }
 
-d.onclick = () => {
-    const idx = [...el.grid.querySelectorAll('.card')].indexOf(d);
-    if(idx >= 0 && S.movies[idx]) play(S.movies[idx]);
+    if(S.view === 'player'){
+        playerKey(k);
+        return;
+    }
+
+    // Evitar que Tab cambie el focus
+    if(k === 'Tab') {
+        e.preventDefault();
+        if(S.focus === el.srch) {
+            // Si estamos en search, ir al siguiente elemento del header
+            navigateHeader('right');
+        } else {
+            // Por defecto, ir al primer elemento del header
+            setFocusHeader(0);
+        }
+        return;
+    }
+
+    nav(k);
 };
 
-return d;
-
-}
-
-// ===== REPRODUCTOR (sin cambios mayores) =====function play(m) {S.lastFocus = S.focus;S.view = 'player';S.retry = 0;history.pushState({v:'player'},'','#player');el.pErr.classList.remove('show');el.pLoad.classList.add('show');el.pLoadTxt.textContent = 'Conectando...';el.pTitle.textContent = m.title;el.player.classList.add('open');el.vid.pause();el.vid.removeAttribute('src');el.vid.load();
-
-setTimeout(() => {
-    let u = m.url;
-    if(u.startsWith('http://') || location.protocol === 'https:') {
-        u = '/video-proxy?url=' + encodeURIComponent(u);
+function nav(k) {
+    // Activar elemento seleccionado
+    if(k === 'Enter' || k === ' ') {
+        if(S.focus === el.logo) {
+            // Recargar página
+            location.reload();
+        } else if(S.focus === el.srch) {
+            el.srch.focus();
+            // Si hay texto, ejecutar búsqueda
+            if(el.srch.value.trim()) {
+                loadMovies(false);
+            }
+        } else if(S.focus === el.mix) {
+            loadMovies(true);
+        } else if(S.focus && S.focus.classList.contains('card')) {
+            const idx = [...el.grid.querySelectorAll('.card')].indexOf(S.focus);
+            if(idx >= 0 && S.movies[idx]) play(S.movies[idx]);
+        }
+        return;
     }
-    el.vid.src = u;
-    el.vid.play().catch(playErr);
-    showUI();
-}, 50);
 
-}
+    // Escape para limpiar búsqueda
+    if(k === 'Escape') {
+        if(el.srch.value.trim()) {
+            el.srch.value = '';
+            loadMovies(false);
+        } else if(S.currentIndex >= 0) {
+            // Si estamos en el grid, ir al header
+            setFocusHeader(2); // Ir al botón mix
+        }
+        return;
+    }
 
-function closeP() {el.vid.pause();el.vid.removeAttribute('src');el.vid.load();el.player.classList.remove('open');S.view = 'home';
+    // Backspace
+    if(k === 'Backspace') {
+        if(S.focus === el.srch && el.srch.value.length > 0) {
+            // Permitir borrar en el input
+            return;
+        } else if(S.currentIndex >= 0) {
+            // Si estamos en el grid, ir al header
+            setFocusHeader(2);
+        }
+        return;
+    }
 
-setTimeout(() => {
-    // Restaurar focus a donde estaba
-    if(S.lastFocus && S.lastFocus.classList) {
-        if(S.lastFocus.classList.contains('card')) {
-            const cards = getCards();
-            const idx = cards.indexOf(S.lastFocus);
-            if(idx >= 0) {
-                setFocusGrid(idx);
-            } else {
+    // Navegación con flechas
+    if(['ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(k)) {
+        const direction = k.toLowerCase().replace('arrow', '');
+
+        if(S.currentIndex >= 0) {
+            // Estamos en el grid
+            if(!navigateGrid(direction) && direction === 'right') {
+                // Si no se pudo navegar en el grid y es derecha, ir al header
                 setFocusHeader(0);
+            }
+        } else if(S.headerIndex >= 0) {
+            // Estamos en el header
+            if(!navigateHeader(direction) && direction === 'left' && S.headerIndex === 0) {
+                // Si estamos en el logo y vamos a la izquierda, loop al final del grid
+                const cards = getCards();
+                if(cards.length > 0) {
+                    setFocusGrid(cards.length - 1);
+                }
             }
         } else {
-            // Es un elemento del header
-            const idx = S.headerElements.indexOf(S.lastFocus);
-            if(idx >= 0) {
-                setFocusHeader(idx);
-            } else {
-                setFocusHeader(0);
-            }
+            // Sin focus, empezar en el header
+            setFocusHeader(0);
         }
-    } else {
-        setFocusHeader(0);
     }
-}, 50);
-
 }
 
-el.vid.onloadstart = () => {el.pLoad.classList.add('show');el.pErr.classList.remove('show');el.pLoadTxt.textContent = 'Conectando...';};
+// Eventos de focus para elementos del header
+el.logo.addEventListener('focus', () => setFocusHeader(0));
+el.srch.addEventListener('focus', () => setFocusHeader(1));
+el.mix.addEventListener('focus', () => setFocusHeader(2));
 
-el.vid.oncanplay = () => {el.pLoad.classList.remove('show');S.retry = 0;};
+// Clic en logo para recargar
+el.logo.addEventListener('click', () => location.reload());
 
-el.vid.onwaiting = () => {el.pLoad.classList.add('show');el.pLoadTxt.textContent = 'Buffering...';};
+// ===== BÚSQUEDA Y CARGA DE PELÍCULAS =====
+let searchTimer;
+el.srch.oninput = () => {
+    clearTimeout(searchTimer);
+    searchTimer = setTimeout(() => loadMovies(false), 400);
+};
 
-el.vid.onplaying = () => {el.pLoad.classList.remove('show');S.playing = true;el.pPp.textContent = '⏸';};
+el.mix.onclick = () => loadMovies(true);
 
-el.vid.onpause = () => {S.playing = false;el.pPp.textContent = '▶';};
+function loadMovies(random) {
+    el.grid.innerHTML = '<div class="msg load">Cargando</div>';
+    const q = el.srch.value.trim();
+    fetch('/api/movies?limit=200' + (q ? '&q=' + encodeURIComponent(q) : '') + (random ? '&random=true' : ''))
+        .then(r => r.json())
+        .then(d => {
+            el.grid.innerHTML = '';
+            S.movies = d.data;
+            S.currentIndex = -1;
 
-el.vid.ontimeupdate = () => {if(!el.vid.duration) return;el.pFill.style.width = (el.vid.currentTime / el.vid.duration * 100) + '%';el.pCur.textContent = fmt(el.vid.currentTime);};
+            // Crear cards con animación escalonada
+            d.data.forEach((m, i) => {
+                setTimeout(() => {
+                    el.grid.appendChild(mkCard(m));
+                }, i * 10); // Pequeño delay para animación escalonada
+            });
+
+            // Calcular columnas y reinicializar lazy loading
+            setTimeout(() => {
+                calculateGridColumns();
+                initLazyLoading();
+
+                // Enfocar primera card si hay resultados
+                const cards = getCards();
+                if(cards.length > 0) {
+                    setFocusGrid(0);
+                } else {
+                    // Si no hay resultados, mantener focus en search
+                    setFocusHeader(1);
+                }
+            }, 100);
+        })
+        .catch(() => {
+            el.grid.innerHTML = '<div class="msg">Error al cargar</div>';
+            setFocusHeader(1);
+        });
+}
+
+function mkCard(m) {
+    const d = document.createElement('div');
+    d.className = 'card';
+    d.tabIndex = -1;
+
+    const posterSrc = m.poster || '';
+    d.innerHTML = '<img data-src="' + esc(posterSrc) + '" alt="' + esc(m.title) + '">' +
+                  '<div class="card-t">' + esc(m.title) + '</div>';
+
+    d.onclick = () => {
+        const idx = [...el.grid.querySelectorAll('.card')].indexOf(d);
+        if(idx >= 0 && S.movies[idx]) play(S.movies[idx]);
+    };
+
+    return d;
+}
+
+// ===== REPRODUCTOR (sin cambios mayores) =====
+function play(m) {
+    S.lastFocus = S.focus;
+    S.view = 'player';
+    S.retry = 0;
+    history.pushState({v:'player'},'','#player');
+    el.pErr.classList.remove('show');
+    el.pLoad.classList.add('show');
+    el.pLoadTxt.textContent = 'Conectando...';
+    el.pTitle.textContent = m.title;
+    el.player.classList.add('open');
+    el.vid.pause();
+    el.vid.removeAttribute('src');
+    el.vid.load();
+
+    setTimeout(() => {
+        let u = m.url;
+        if(u.startsWith('http://') || location.protocol === 'https:') {
+            u = '/video-proxy?url=' + encodeURIComponent(u);
+        }
+        el.vid.src = u;
+        el.vid.play().catch(playErr);
+        showUI();
+    }, 50);
+}
+
+function closeP() {
+    el.vid.pause();
+    el.vid.removeAttribute('src');
+    el.vid.load();
+    el.player.classList.remove('open');
+    S.view = 'home';
+
+    setTimeout(() => {
+        // Restaurar focus a donde estaba
+        if(S.lastFocus && S.lastFocus.classList) {
+            if(S.lastFocus.classList.contains('card')) {
+                const cards = getCards();
+                const idx = cards.indexOf(S.lastFocus);
+                if(idx >= 0) {
+                    setFocusGrid(idx);
+                } else {
+                    setFocusHeader(0);
+                }
+            } else {
+                // Es un elemento del header
+                const idx = S.headerElements.indexOf(S.lastFocus);
+                if(idx >= 0) {
+                    setFocusHeader(idx);
+                } else {
+                    setFocusHeader(0);
+                }
+            }
+        } else {
+            setFocusHeader(0);
+        }
+    }, 50);
+}
+
+el.vid.onloadstart = () => {
+    el.pLoad.classList.add('show');
+    el.pErr.classList.remove('show');
+    el.pLoadTxt.textContent = 'Conectando...';
+};
+
+el.vid.oncanplay = () => {
+    el.pLoad.classList.remove('show');
+    S.retry = 0;
+};
+
+el.vid.onwaiting = () => {
+    el.pLoad.classList.add('show');
+    el.pLoadTxt.textContent = 'Buffering...';
+};
+
+el.vid.onplaying = () => {
+    el.pLoad.classList.remove('show');
+    S.playing = true;
+    el.pPp.textContent = '⏸';
+};
+
+el.vid.onpause = () => {
+    S.playing = false;
+    el.pPp.textContent = '▶';
+};
+
+el.vid.ontimeupdate = () => {
+    if(!el.vid.duration) return;
+    el.pFill.style.width = (el.vid.currentTime / el.vid.duration * 100) + '%';
+    el.pCur.textContent = fmt(el.vid.currentTime);
+};
 
 el.vid.ondurationchange = () => el.pDur.textContent = fmt(el.vid.duration);
 
-el.vid.onprogress = () => {try {if(el.vid.buffered.length) {el.pBuf.style.width = (el.vid.buffered.end(el.vid.buffered.length - 1) / el.vid.duration * 100) + '%';}} catch(e) {}};
+el.vid.onprogress = () => {
+    try {
+        if(el.vid.buffered.length) {
+            el.pBuf.style.width = (el.vid.buffered.end(el.vid.buffered.length - 1) / el.vid.duration * 100) + '%';
+        }
+    } catch(e) {}
+};
 
-el.vid.onerror = () => {const err = el.vid.error;el.pErrTxt.textContent = err ? ['','Abortado','Red','Decode','No soportado'][err.code] || 'Error' : 'Error';if(err && err.code === 2 && S.retry < 2) {S.retry++;el.pLoadTxt.textContent = 'Reintentando...';setTimeout(retry, 1500);} else {el.pLoad.classList.remove('show');el.pErr.classList.add('show');}};
+el.vid.onerror = () => {
+    const err = el.vid.error;
+    el.pErrTxt.textContent = err ? ['','Abortado','Red','Decode','No soportado'][err.code] || 'Error' : 'Error';
+    if(err && err.code === 2 && S.retry < 2) {
+        S.retry++;
+        el.pLoadTxt.textContent = 'Reintentando...';
+        setTimeout(retry, 1500);
+    } else {
+        el.pLoad.classList.remove('show');
+        el.pErr.classList.add('show');
+    }
+};
 
-el.vid.onended = () => {S.playing = false;el.pPp.textContent = '▶';showUI();};
+el.vid.onended = () => {
+    S.playing = false;
+    el.pPp.textContent = '▶';
+    showUI();
+};
 
-function playErr(e) {if(e.name === 'NotAllowedError') showUI();else if(e.name === 'NotSupportedError') {el.pErrTxt.textContent = 'No soportado';el.pErr.classList.add('show');el.pLoad.classList.remove('show');}}
+function playErr(e) {
+    if(e.name === 'NotAllowedError') showUI();
+    else if(e.name === 'NotSupportedError') {
+        el.pErrTxt.textContent = 'No soportado';
+        el.pErr.classList.add('show');
+        el.pLoad.classList.remove('show');
+    }
+}
 
-function retry() {el.pErr.classList.remove('show');el.pLoad.classList.add('show');const t = el.vid.currentTime || 0;el.vid.pause();el.vid.load();setTimeout(() => {el.vid.currentTime = t;el.vid.play().catch(playErr);}, 300);}
+function retry() {
+    el.pErr.classList.remove('show');
+    el.pLoad.classList.add('show');
+    const t = el.vid.currentTime || 0;
+    el.vid.pause();
+    el.vid.load();
+    setTimeout(() => {
+        el.vid.currentTime = t;
+        el.vid.play().catch(playErr);
+    }, 300);
+}
 
-function playerKey(k) {showUI();if(k === 'ArrowLeft') seek(-10);else if(k === 'ArrowRight') seek(10);else if(k === 'ArrowUp') vol(.1);else if(k === 'ArrowDown') vol(-.1);else if(k === 'Enter' || k === ' ') toggle();else if(k === 'Escape' || k === 'Backspace') history.back();}
+function playerKey(k) {
+    showUI();
+    if(k === 'ArrowLeft') seek(-10);
+    else if(k === 'ArrowRight') seek(10);
+    else if(k === 'ArrowUp') vol(.1);
+    else if(k === 'ArrowDown') vol(-.1);
+    else if(k === 'Enter' || k === ' ') toggle();
+    else if(k === 'Escape' || k === 'Backspace') history.back();
+}
 
-function toggle() {if(el.vid.paused) {el.vid.play().catch(playErr);showInd('▶');} else {el.vid.pause();showInd('⏸');}}
+function toggle() {
+    if(el.vid.paused) {
+        el.vid.play().catch(playErr);
+        showInd('▶');
+    } else {
+        el.vid.pause();
+        showInd('⏸');
+    }
+}
 
-function seek(s) {if(!el.vid.duration) return;el.vid.currentTime = Math.max(0, Math.min(el.vid.currentTime + s, el.vid.duration));showInd((s > 0 ? '+' : '') + s + 's');}
+function seek(s) {
+    if(!el.vid.duration) return;
+    el.vid.currentTime = Math.max(0, Math.min(el.vid.currentTime + s, el.vid.duration));
+    showInd((s > 0 ? '+' : '') + s + 's');
+}
 
-function vol(d) {try {el.vid.volume = Math.max(0, Math.min(1, el.vid.volume + d));} catch(e) {}}
+function vol(d) {
+    try {
+        el.vid.volume = Math.max(0, Math.min(1, el.vid.volume + d));
+    } catch(e) {}
+}
 
-let hideT, indT;function showInd(t) {el.pInd.textContent = t;el.pInd.classList.add('show');clearTimeout(indT);indT = setTimeout(() => el.pInd.classList.remove('show'), 500);}
+let hideT, indT;
+function showInd(t) {
+    el.pInd.textContent = t;
+    el.pInd.classList.add('show');
+    clearTimeout(indT);
+    indT = setTimeout(() => el.pInd.classList.remove('show'), 500);
+}
 
-function showUI() {el.pUi.classList.remove('hide');clearTimeout(hideT);hideT = setTimeout(() => {if(S.playing) el.pUi.classList.add('hide');}, 3000);}
+function showUI() {
+    el.pUi.classList.remove('hide');
+    clearTimeout(hideT);
+    hideT = setTimeout(() => {
+        if(S.playing) el.pUi.classList.add('hide');
+    }, 3000);
+}
 
-function fmt(s) {if(!s || !isFinite(s)) return '0:00';const h = ~~(s / 3600);const m = ~~(s % 3600 / 60);const ss = ~~(s % 60);return h ? h + ':' + String(m).padStart(2, '0') + ':' + String(ss).padStart(2, '0') : m + ':' + String(ss).padStart(2, '0');}
+function fmt(s) {
+    if(!s || !isFinite(s)) return '0:00';
+    const h = ~~(s / 3600);
+    const m = ~~(s % 3600 / 60);
+    const ss = ~~(s % 60);
+    return h ? h + ':' + String(m).padStart(2, '0') + ':' + String(ss).padStart(2, '0') : m + ':' + String(ss).padStart(2, '0');
+}
 
-// Eventos del reproductorel.pPp.onclick = toggle;el.pRw.onclick = () => seek(-10);el.pFw.onclick = () => seek(10);el.pBar.onclick = e => {const r = el.pBar.getBoundingClientRect();if(el.vid.duration) el.vid.currentTime = (e.clientX - r.left) / r.width * el.vid.duration;};el.pRetry.onclick = retry;el.pBack.onclick = () => history.back();el.player.onclick = e => {if(e.target === el.vid) {toggle();showUI();}};el.player.onmousemove = showUI;
+// Eventos del reproductor
+el.pPp.onclick = toggle;
+el.pRw.onclick = () => seek(-10);
+el.pFw.onclick = () => seek(10);
+el.pBar.onclick = e => {
+    const r = el.pBar.getBoundingClientRect();
+    if(el.vid.duration) el.vid.currentTime = (e.clientX - r.left) / r.width * el.vid.duration;
+};
+el.pRetry.onclick = retry;
+el.pBack.onclick = () => history.back();
+el.player.onclick = e => {
+    if(e.target === el.vid) {
+        toggle();
+        showUI();
+    }
+};
+el.player.onmousemove = showUI;
 
-let tx, ty;el.vid.ontouchstart = e => {tx = e.touches[0].clientX;ty = e.touches[0].clientY;};el.vid.ontouchend = e => {const dx = e.changedTouches[0].clientX - tx;const dy = e.changedTouches[0].clientY - ty;if(Math.abs(dx) > 50 && Math.abs(dy) < 50) seek(dx > 0 ? 10 : -10);else showUI();};el.pBar.ontouchstart = el.pBar.ontouchmove = e => {e.preventDefault();const r = el.pBar.getBoundingClientRect();if(el.vid.duration) {el.vid.currentTime = Math.max(0, Math.min(1, (e.touches[0].clientX - r.left) / r.width)) * el.vid.duration;}};
+let tx, ty;
+el.vid.ontouchstart = e => {
+    tx = e.touches[0].clientX;
+    ty = e.touches[0].clientY;
+};
+el.vid.ontouchend = e => {
+    const dx = e.changedTouches[0].clientX - tx;
+    const dy = e.changedTouches[0].clientY - ty;
+    if(Math.abs(dx) > 50 && Math.abs(dy) < 50) seek(dx > 0 ? 10 : -10);
+    else showUI();
+};
+el.pBar.ontouchstart = el.pBar.ontouchmove = e => {
+    e.preventDefault();
+    const r = el.pBar.getBoundingClientRect();
+    if(el.vid.duration) {
+        el.vid.currentTime = Math.max(0, Math.min(1, (e.touches[0].clientX - r.left) / r.width)) * el.vid.duration;
+    }
+};
 
-function esc(s) {return s ? String(s).replace(/[&<>"']/g, c => ({'&': '&', '<': '<', '>': '>', '"': '"', "'": '''})[c]) : '';}
+function esc(s) {
+    return s ? String(s).replace(/[&<>"']/g, c => ({
+        '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+    })[c]) : '';
+}
 
-// Iniciar aplicacióninit();
+// Iniciar aplicación
+init();
 
-// Recalcular columnas al redimensionarlet resizeTimer;window.addEventListener('resize', () => {clearTimeout(resizeTimer);resizeTimer = setTimeout(() => {calculateGridColumns();}, 150);});})();</script></body></html>`));
+// Recalcular columnas al redimensionar
+let resizeTimer;
+window.addEventListener('resize', () => {
+    clearTimeout(resizeTimer);
+    resizeTimer = setTimeout(() => {
+        calculateGridColumns();
+    }, 150);
+});
+})();
+</script></body></html>`));
 
 app.listen(PORT,'0.0.0.0',()=>console.log('🎬 Movies+ → Puerto '+PORT+' | '+MOVIES.length+' películas'));
