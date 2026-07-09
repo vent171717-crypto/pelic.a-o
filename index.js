@@ -220,14 +220,14 @@ function loadImageWithAnimation(img) {
         img.style.background = 'none';
     };
 
-    // Pequeño delay para mostrar la animación de carga
+    // Reducido de 100 a 20ms para carga más rápida
     setTimeout(() => {
         imgEl.src = src;
-    }, 100);
+    }, 20);
 }
 
 function preloadAdjacentImages(index) {
-    const cards = getCards();
+    const cards = getCardsFast();
     if(!cards.length) return;
 
     // Cargar imágenes en un radio de 2 elementos
@@ -409,9 +409,9 @@ function navigateHeader(direction) {
     return false;
 }
 
-// ===== MANEJO DE TECLADO OPTIMIZADO =====
-let keyDebounceTimer = null;
+// ===== MANEJO DE TECLADO ULTRA RÁPIDO =====
 let lastKeyTime = 0;
+let pendingKey = null;
 
 document.onkeydown = e => {
     const k = e.key;
@@ -422,9 +422,9 @@ document.onkeydown = e => {
         e.stopPropagation();
     }
 
-    // Debounce para evitar procesamiento repetitivo de teclas
+    // Debounce más agresivo (30ms)
     const now = Date.now();
-    if (now - lastKeyTime < 50) { // 50ms de debounce
+    if (now - lastKeyTime < 30) {
         return;
     }
     lastKeyTime = now;
@@ -438,10 +438,8 @@ document.onkeydown = e => {
     if(k === 'Tab') {
         e.preventDefault();
         if(S.focus === el.srch) {
-            // Si estamos en search, ir al siguiente elemento del header
             navigateHeader('right');
         } else {
-            // Por defecto, ir al primer elemento del header
             setFocusHeader(0);
         }
         return;
@@ -454,11 +452,9 @@ function nav(k) {
     // Activar elemento seleccionado
     if(k === 'Enter' || k === ' ') {
         if(S.focus === el.logo) {
-            // Recargar página
             location.reload();
         } else if(S.focus === el.srch) {
             el.srch.focus();
-            // Si hay texto, ejecutar búsqueda
             if(el.srch.value.trim()) {
                 loadMovies(false);
             }
@@ -471,51 +467,40 @@ function nav(k) {
         return;
     }
 
-    // Escape para limpiar búsqueda
     if(k === 'Escape') {
         if(el.srch.value.trim()) {
             el.srch.value = '';
             loadMovies(false);
         } else if(S.currentIndex >= 0) {
-            // Si estamos en el grid, ir al header
-            setFocusHeader(2); // Ir al botón mix
-        }
-        return;
-    }
-
-    // Backspace
-    if(k === 'Backspace') {
-        if(S.focus === el.srch && el.srch.value.length > 0) {
-            // Permitir borrar en el input
-            return;
-        } else if(S.currentIndex >= 0) {
-            // Si estamos en el grid, ir al header
             setFocusHeader(2);
         }
         return;
     }
 
-    // Navegación con flechas
+    if(k === 'Backspace') {
+        if(S.focus === el.srch && el.srch.value.length > 0) {
+            return;
+        } else if(S.currentIndex >= 0) {
+            setFocusHeader(2);
+        }
+        return;
+    }
+
     if(['ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(k)) {
         const direction = k.toLowerCase().replace('arrow', '');
 
         if(S.currentIndex >= 0) {
-            // Estamos en el grid
             if(!navigateGrid(direction) && direction === 'right') {
-                // Si no se pudo navegar en el grid y es derecha, ir al header
                 setFocusHeader(0);
             }
         } else if(S.headerIndex >= 0) {
-            // Estamos en el header
             if(!navigateHeader(direction) && direction === 'left' && S.headerIndex === 0) {
-                // Si estamos en el logo y vamos a la izquierda, loop al final del grid
                 const cards = getCardsFast();
                 if(cards.length > 0) {
                     setFocusGrid(cards.length - 1);
                 }
             }
         } else {
-            // Sin focus, empezar en el header
             setFocusHeader(0);
         }
     }
@@ -529,17 +514,20 @@ el.mix.addEventListener('focus', () => setFocusHeader(2));
 // Clic en logo para recargar
 el.logo.addEventListener('click', () => location.reload());
 
-// ===== BÚSQUEDA Y CARGA DE PELÍCULAS OPTIMIZADA =====
+// ===== BÚSQUEDA Y CARGA DE PELÍCULAS ULTRA RÁPIDA =====
 let searchTimer;
 el.srch.oninput = () => {
     clearTimeout(searchTimer);
-    searchTimer = setTimeout(() => loadMovies(false), 300); // Reducido de 400 a 300ms
+    searchTimer = setTimeout(() => loadMovies(false), 200); // Reducido de 300 a 200ms
 };
 
 el.mix.onclick = () => loadMovies(true);
 
 function loadMovies(random) {
-    el.grid.innerHTML = '<div class="msg load">Cargando</div>';
+    // Mostrar mensaje de carga sin pantalla negra
+    const currentGrid = el.grid.innerHTML;
+    el.grid.innerHTML = '<div class="msg load">Cargando...</div>';
+    
     const q = el.srch.value.trim();
     fetch('/api/movies?limit=200' + (q ? '&q=' + encodeURIComponent(q) : '') + (random ? '&random=true' : ''))
         .then(r => r.json())
@@ -548,7 +536,7 @@ function loadMovies(random) {
             S.movies = d.data;
             S.currentIndex = -1;
 
-            // Crear cards con animación escalonada más rápida
+            // Crear todas las cards instantáneamente
             const fragment = document.createDocumentFragment();
             d.data.forEach(m => {
                 fragment.appendChild(mkCard(m));
@@ -558,20 +546,22 @@ function loadMovies(random) {
             // Actualizar cache de cards
             refreshCardCache();
 
-            // Calcular columnas y reinicializar lazy loading
-            setTimeout(() => {
-                calculateGridColumns();
-                initLazyLoading();
+            // Calcular columnas y cargar imágenes
+            calculateGridColumns();
+            initLazyLoading();
 
-                // Enfocar primera card si hay resultados
-                const cards = getCardsFast();
-                if(cards.length > 0) {
-                    setFocusGrid(0);
-                } else {
-                    // Si no hay resultados, mantener focus en search
-                    setFocusHeader(1);
+            // Enfocar primera card inmediatamente
+            const cards = getCardsFast();
+            if(cards.length > 0) {
+                // Cargar primeras imágenes rápidamente
+                for(let i = 0; i < Math.min(6, cards.length); i++) {
+                    const img = cards[i].querySelector('img[data-src]');
+                    if(img) loadImageWithAnimation(img);
                 }
-            }, 50); // Reducido de 100 a 50ms
+                setFocusGrid(0);
+            } else {
+                setFocusHeader(1);
+            }
         })
         .catch(() => {
             el.grid.innerHTML = '<div class="msg">Error al cargar</div>';
@@ -596,7 +586,7 @@ function mkCard(m) {
     return d;
 }
 
-// ===== REPRODUCTOR OPTIMIZADO =====
+// ===== REPRODUCTOR SIN PANTALLA NEGRA =====
 function play(m) {
     S.lastFocus = S.focus;
     S.view = 'player';
@@ -611,16 +601,16 @@ function play(m) {
     el.vid.removeAttribute('src');
     el.vid.load();
 
-    // Reducido de 50 a 20ms
-    setTimeout(() => {
-        let u = m.url;
-        if(u.startsWith('http://') || location.protocol === 'https:') {
-            u = '/video-proxy?url=' + encodeURIComponent(u);
-        }
-        el.vid.src = u;
-        el.vid.play().catch(playErr);
-        showUI();
-    }, 20);
+    // Iniciar reproducción inmediatamente
+    let u = m.url;
+    if(u.startsWith('http://') || location.protocol === 'https:') {
+        u = '/video-proxy?url=' + encodeURIComponent(u);
+    }
+    el.vid.src = u;
+    
+    // Intentar reproducir inmediatamente
+    el.vid.play().catch(playErr);
+    showUI();
 }
 
 function closeP() {
@@ -630,9 +620,8 @@ function closeP() {
     el.player.classList.remove('open');
     S.view = 'home';
 
-    // Reducido de 50 a 20ms
+    // Restaurar focus inmediatamente
     setTimeout(() => {
-        // Restaurar focus a donde estaba
         if(S.lastFocus && S.lastFocus.classList) {
             if(S.lastFocus.classList.contains('card')) {
                 const cards = getCardsFast();
@@ -643,7 +632,6 @@ function closeP() {
                     setFocusHeader(0);
                 }
             } else {
-                // Es un elemento del header
                 const idx = S.headerElements.indexOf(S.lastFocus);
                 if(idx >= 0) {
                     setFocusHeader(idx);
@@ -654,7 +642,7 @@ function closeP() {
         } else {
             setFocusHeader(0);
         }
-    }, 20);
+    }, 10); // Reducido de 20 a 10ms
 }
 
 el.vid.onloadstart = () => {
@@ -706,7 +694,7 @@ el.vid.onerror = () => {
     if(err && err.code === 2 && S.retry < 2) {
         S.retry++;
         el.pLoadTxt.textContent = 'Reintentando...';
-        setTimeout(retry, 1500);
+        setTimeout(retry, 1000);
     } else {
         el.pLoad.classList.remove('show');
         el.pErr.classList.add('show');
@@ -737,7 +725,7 @@ function retry() {
     setTimeout(() => {
         el.vid.currentTime = t;
         el.vid.play().catch(playErr);
-    }, 300);
+    }, 200);
 }
 
 function playerKey(k) {
@@ -777,7 +765,7 @@ function showInd(t) {
     el.pInd.textContent = t;
     el.pInd.classList.add('show');
     clearTimeout(indT);
-    indT = setTimeout(() => el.pInd.classList.remove('show'), 500);
+    indT = setTimeout(() => el.pInd.classList.remove('show'), 400);
 }
 
 function showUI() {
@@ -785,7 +773,7 @@ function showUI() {
     clearTimeout(hideT);
     hideT = setTimeout(() => {
         if(S.playing) el.pUi.classList.add('hide');
-    }, 3000);
+    }, 2500);
 }
 
 function fmt(s) {
@@ -848,11 +836,11 @@ window.addEventListener('resize', () => {
     clearTimeout(resizeTimer);
     resizeTimer = setTimeout(() => {
         calculateGridColumns();
-    }, 100); // Reducido de 150 a 100ms
+    }, 50); // Reducido de 100 a 50ms
 });
 
 // Actualizar cache de cards periódicamente
-setInterval(refreshCardCache, 1000);
+setInterval(refreshCardCache, 500); // Reducido de 1000 a 500ms
 })();
 </script></body></html>`));
 
