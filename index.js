@@ -42,38 +42,37 @@ const CATEGORIES = [
     'Romances',
     'Sci-fi',
     'Terror',
-	'2025',
-	'2024',
-	'2023',
-	'2022',
-	'2021',
-	'2020',
-	'2019',
-	'2018',
-	'2017',
-	'2016',
-	'2015',
-	'2014',
-	'2013',
-	'2012',
-	'2011',
-	'2010',
-	'2009',
-	'2008',
-	'2007',
-	'2006',
-	'2005',
-	'2004',
-	'2003',
-	'2002',
-	'2001',
-	'2000',
-	'1999',
-	'1998',
-	'1997',
-	'1996',
-	'1995'
-		
+    '2025',
+    '2024',
+    '2023',
+    '2022',
+    '2021',
+    '2020',
+    '2019',
+    '2018',
+    '2017',
+    '2016',
+    '2015',
+    '2014',
+    '2013',
+    '2012',
+    '2011',
+    '2010',
+    '2009',
+    '2008',
+    '2007',
+    '2006',
+    '2005',
+    '2004',
+    '2003',
+    '2002',
+    '2001',
+    '2000',
+    '1999',
+    '1998',
+    '1997',
+    '1996',
+    '1995'
 ];
 
 const KEYWORDS = {
@@ -85,103 +84,102 @@ const KEYWORDS = {
         'revenge','retaliation','attack','operation','invasion','resistance'
     ],
     
-      '2026': [
+    '2026': [
         '2026','resistance'
     ],
     '2025': [
         '2025','resistance'
     ],
-	'2024': [
+    '2024': [
         '2024','resistance'
     ],
-	'2023': [
+    '2023': [
         '2023','resistance'
     ],
-	'2022': [
+    '2022': [
         '2022','resistance'
     ],
     '2021': [
         '2021','resistance'
     ],
-	'2020': [
+    '2020': [
         '2020','resistance'
     ],
-	'2019': [
+    '2019': [
         '2019','resistance'
     ],
-	'2018': [
+    '2018': [
         '2018','resistance'
     ],
-	'2017': [
+    '2017': [
         '2017','resistance'
     ],
-	'2016': [
+    '2016': [
         '2016','resistance'
     ],
-	'2015': [
+    '2015': [
         '2015','resistance'
     ],
-	'2014': [
+    '2014': [
         '2014','resistance'
     ],
-	'2013': [
+    '2013': [
         '2013','resistance'
     ],
-	'2012': [
+    '2012': [
         '2012','resistance'
     ],
-	'2011': [
+    '2011': [
         '2011','resistance'
     ],
-	'2010': [
+    '2010': [
         '2010','resistance'
     ],
-	'2009': [
+    '2009': [
         '2009','resistance'
     ],
-	'2008': [
+    '2008': [
         '2008','resistance'
     ],
-	'2007': [
+    '2007': [
         '2007','resistance'
     ],
-	'2006': [
+    '2006': [
         '2006','resistance'
     ],
-	'2005': [
+    '2005': [
         '2005','resistance'
     ],
-	'2004': [
+    '2004': [
         '2004','resistance'
     ],
-	'2003': [
+    '2003': [
         '2003','resistance'
     ],
-	'2002': [
+    '2002': [
         '2002','resistance'
     ],
-	'2001': [
+    '2001': [
         '2001','resistance'
     ],
-	'2000': [
+    '2000': [
         '2000','resistance'
     ],
-	'1999': [
+    '1999': [
         '1999','resistance'
     ],
-	'1998': [
+    '1998': [
         '1998','resistance'
     ],
-	'1997': [
+    '1997': [
         '1997','resistance'
     ],
-	'1996': [
+    '1996': [
         '1996','resistance'
     ],
-	'1995': [
+    '1995': [
         '1995','resistance'
     ],
-	
     
     'Adaptaciones de libros': [
         'based on','from the novel','the book','chapter','volume','adaptation',
@@ -461,47 +459,114 @@ app.get('/api/movies', (req, res) => {
     res.json({ total: list.length, page, hasMore: start + limit < list.length, data: list.slice(start, start + limit) });
 });
 
-// Proxy de video optimizado con mejor manejo de buffer
-app.get('/video-proxy', (req, res) => {
+// ===== PROXY DE VIDEO OPTIMIZADO =====
+// Función mejorada para manejar buffer y streaming de video
+app.get('/video-proxy', videoProxyLimiter, (req, res) => {
     const url = req.query.url;
-    if (!url) return res.status(400).end();
+    if (!url) {
+        return res.status(400).json({ error: 'URL requerida' });
+    }
+
     let parsed;
-    try { parsed = new URL(decodeURIComponent(url)); } catch { return res.status(400).end(); }
+    try {
+        parsed = new URL(decodeURIComponent(url));
+    } catch (e) {
+        return res.status(400).json({ error: 'URL inválida' });
+    }
+
+    // Configurar opciones para la solicitud
     const client = parsed.protocol === 'https:' ? https : http;
-    const headers = { 
-        'User-Agent': 'Mozilla/5.0', 
-        'Accept': '*/*', 
-        'Accept-Encoding': 'identity',
-        'Referer': parsed.origin + '/',
-        'Connection': 'keep-alive'
+    const options = {
+        hostname: parsed.hostname,
+        port: parsed.port || (parsed.protocol === 'https:' ? 443 : 80),
+        path: parsed.pathname + parsed.search,
+        method: 'GET',
+        timeout: 60000, // 60 segundos para mejor manejo de buffer
+        headers: {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Accept': '*/*',
+            'Accept-Language': 'es-ES,es;q=0.9,en;q=0.8',
+            'Accept-Encoding': 'identity', // No comprimir para mejor streaming
+            'Connection': 'keep-alive',
+            'Referer': parsed.origin + '/'
+        }
     };
-    if (req.headers.range) headers['Range'] = req.headers.range;
-    
-    const proxyReq = client.request({ 
-        hostname: parsed.hostname, 
-        port: parsed.port || (parsed.protocol === 'https:' ? 443 : 80), 
-        path: parsed.pathname + parsed.search, 
-        headers, 
-        timeout: 60000 // Aumentado a 60 segundos
-    }, proxyRes => {
-        if ([301, 302, 307, 308].includes(proxyRes.statusCode) && proxyRes.headers.location) {
+
+    // Si el cliente envía un rango, reenviarlo para soporte de seek
+    if (req.headers.range) {
+        options.headers['Range'] = req.headers.range;
+    }
+
+    // Realizar la solicitud al servidor remoto
+    const proxyReq = client.request(options, (proxyRes) => {
+        // Manejar redirecciones
+        if ([301, 302, 303, 307, 308].includes(proxyRes.statusCode) && proxyRes.headers.location) {
             proxyRes.destroy();
             return res.redirect(307, '/video-proxy?url=' + encodeURIComponent(proxyRes.headers.location));
         }
-        const h = { 
-            'Content-Type': proxyRes.headers['content-type'] || 'video/mp4', 
+
+        // Configurar cabeceras de respuesta
+        const headers = {
+            'Content-Type': proxyRes.headers['content-type'] || 'video/mp4',
             'Accept-Ranges': 'bytes',
-            'Cache-Control': 'no-cache'
+            'Cache-Control': 'no-cache', // Mejor para streaming
+            'X-Content-Type-Options': 'nosniff',
+            'Access-Control-Allow-Origin': '*',
+            'Access-Control-Expose-Headers': 'Content-Range, Accept-Ranges, Content-Length'
         };
-        if (proxyRes.headers['content-length']) h['Content-Length'] = proxyRes.headers['content-length'];
-        if (proxyRes.headers['content-range']) h['Content-Range'] = proxyRes.headers['content-range'];
-        res.writeHead(proxyRes.statusCode, h);
-        proxyRes.pipe(res);
-        proxyRes.on('error', () => res.end());
+
+        // Reenviar cabeceras importantes
+        if (proxyRes.headers['content-length']) {
+            headers['Content-Length'] = proxyRes.headers['content-length'];
+        }
+        if (proxyRes.headers['content-range']) {
+            headers['Content-Range'] = proxyRes.headers['content-range'];
+        }
+
+        // Configurar respuesta
+        res.writeHead(proxyRes.statusCode, headers);
+
+        // Pipe del stream con manejo de errores mejorado
+        proxyRes.pipe(res, { end: true });
+
+        // Manejar errores del stream
+        proxyRes.on('error', (err) => {
+            console.error('Error en stream remoto:', err.message);
+            if (!res.headersSent) {
+                res.status(502).json({ error: 'Error en el stream de video' });
+            } else {
+                res.end();
+            }
+        });
+
+        // Log de errores de conexión
+        proxyRes.on('close', () => {
+            console.log('Conexión remota cerrada');
+        });
     });
-    proxyReq.on('error', () => !res.headersSent && res.status(502).end());
-    proxyReq.on('timeout', () => { proxyReq.destroy(); !res.headersSent && res.status(504).end(); });
-    req.on('close', () => proxyReq.destroy());
+
+    // Manejar timeout
+    proxyReq.on('timeout', () => {
+        proxyReq.destroy();
+        if (!res.headersSent) {
+            res.status(504).json({ error: 'Timeout en la conexión' });
+        }
+    });
+
+    // Manejar errores de la solicitud
+    proxyReq.on('error', (err) => {
+        console.error('Error en proxy:', err.message);
+        if (!res.headersSent) {
+            res.status(502).json({ error: 'Error de conexión al servidor remoto' });
+        }
+    });
+
+    // Limpiar si el cliente cierra la conexión
+    req.on('close', () => {
+        proxyReq.destroy();
+    });
+
+    // Finalizar la solicitud
     proxyReq.end();
 });
 
@@ -652,39 +717,39 @@ video{position:absolute;inset:0;width:100%;height:100%;object-fit:contain}
             <button class="cat" data-cat="Romances">Romances</button>
             <button class="cat" data-cat="Sci-fi">Sci-fi</button>
             <button class="cat" data-cat="Terror">Terror</button>
-			<button class="cat" data-cat="2026">2026</button>
-			<button class="cat" data-cat="2025">2025</button>
-			<button class="cat" data-cat="2024">2024</button>
-			<button class="cat" data-cat="2023">2023</button>
-			<button class="cat" data-cat="2022">2022</button>
-			<button class="cat" data-cat="2021">2021</button>
-			<button class="cat" data-cat="2020">2020</button>
-			<button class="cat" data-cat="2019">2019</button>
-			<button class="cat" data-cat="2018">2018</button>
-			<button class="cat" data-cat="2017">2017</button>			
-			<button class="cat" data-cat="2016">2016</button>
-			<button class="cat" data-cat="2015">2015</button>
-			<button class="cat" data-cat="2014">2014</button>
-			<button class="cat" data-cat="2013">2013</button>
-			<button class="cat" data-cat="2012">2012</button>
-			<button class="cat" data-cat="2011">2011</button>
-			<button class="cat" data-cat="2010">2010</button>
-			<button class="cat" data-cat="2009">2009</button>
-			<button class="cat" data-cat="2008">2008</button>
-			<button class="cat" data-cat="2007">2007</button>
-			<button class="cat" data-cat="2006">2006</button>
-			<button class="cat" data-cat="2005">2005</button>
-			<button class="cat" data-cat="2004">2004</button>
-			<button class="cat" data-cat="2003">2003</button>
-			<button class="cat" data-cat="2002">2002</button>
-			<button class="cat" data-cat="2001">2001</button>
-			<button class="cat" data-cat="2000">2000</button>
-			<button class="cat" data-cat="1999">1999</button>
-			<button class="cat" data-cat="1998">1998</button>
-			<button class="cat" data-cat="1997">1997</button>
-			<button class="cat" data-cat="1996">1996</button>
-			<button class="cat" data-cat="1995">1995</button>
-			
+            <button class="cat" data-cat="2026">2026</button>
+            <button class="cat" data-cat="2025">2025</button>
+            <button class="cat" data-cat="2024">2024</button>
+            <button class="cat" data-cat="2023">2023</button>
+            <button class="cat" data-cat="2022">2022</button>
+            <button class="cat" data-cat="2021">2021</button>
+            <button class="cat" data-cat="2020">2020</button>
+            <button class="cat" data-cat="2019">2019</button>
+            <button class="cat" data-cat="2018">2018</button>
+            <button class="cat" data-cat="2017">2017</button>            
+            <button class="cat" data-cat="2016">2016</button>
+            <button class="cat" data-cat="2015">2015</button>
+            <button class="cat" data-cat="2014">2014</button>
+            <button class="cat" data-cat="2013">2013</button>
+            <button class="cat" data-cat="2012">2012</button>
+            <button class="cat" data-cat="2011">2011</button>
+            <button class="cat" data-cat="2010">2010</button>
+            <button class="cat" data-cat="2009">2009</button>
+            <button class="cat" data-cat="2008">2008</button>
+            <button class="cat" data-cat="2007">2007</button>
+            <button class="cat" data-cat="2006">2006</button>
+            <button class="cat" data-cat="2005">2005</button>
+            <button class="cat" data-cat="2004">2004</button>
+            <button class="cat" data-cat="2003">2003</button>
+            <button class="cat" data-cat="2002">2002</button>
+            <button class="cat" data-cat="2001">2001</button>
+            <button class="cat" data-cat="2000">2000</button>
+            <button class="cat" data-cat="1999">1999</button>
+            <button class="cat" data-cat="1998">1998</button>
+            <button class="cat" data-cat="1997">1997</button>
+            <button class="cat" data-cat="1996">1996</button>
+            <button class="cat" data-cat="1995">1995</button>
+            
         </div>
     </div>
 
