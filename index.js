@@ -459,51 +459,95 @@ app.get('/api/movies', (req, res) => {
     res.json({ total: list.length, page, hasMore: start + limit < list.length, data: list.slice(start, start + limit) });
 });
 
-// Proxy de video optimizado con mejor manejo de buffer
-app.get('/video-proxy', (req, res) => {
+// ===== PROXY DE VIDEO OPTIMIZADO =====
+app.get('/video-proxy', videoProxyLimiter, (req, res) => {
     const url = req.query.url;
     if (!url) return res.status(400).end();
+    
     let parsed;
-    try { parsed = new URL(decodeURIComponent(url)); } catch { return res.status(400).end(); }
+    try { 
+        parsed = new URL(decodeURIComponent(url)); 
+    } catch { 
+        return res.status(400).end(); 
+    }
+    
     const client = parsed.protocol === 'https:' ? https : http;
     const headers = { 
-        'User-Agent': 'Mozilla/5.0', 
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36', 
         'Accept': '*/*', 
         'Accept-Encoding': 'identity',
+        'Accept-Language': 'es-ES,es;q=0.9,en;q=0.8',
         'Referer': parsed.origin + '/',
         'Connection': 'keep-alive'
     };
-    if (req.headers.range) headers['Range'] = req.headers.range;
+    
+    if (req.headers.range) {
+        headers['Range'] = req.headers.range;
+    }
     
     const proxyReq = client.request({ 
         hostname: parsed.hostname, 
         port: parsed.port || (parsed.protocol === 'https:' ? 443 : 80), 
         path: parsed.pathname + parsed.search, 
         headers, 
-        timeout: 60000 // Aumentado a 60 segundos
+        timeout: 60000 // Aumentado a 60 segundos para mejor buffer
     }, proxyRes => {
+        // Manejar redirecciones
         if ([301, 302, 307, 308].includes(proxyRes.statusCode) && proxyRes.headers.location) {
             proxyRes.destroy();
             return res.redirect(307, '/video-proxy?url=' + encodeURIComponent(proxyRes.headers.location));
         }
+        
         const h = { 
             'Content-Type': proxyRes.headers['content-type'] || 'video/mp4', 
             'Accept-Ranges': 'bytes',
-            'Cache-Control': 'no-cache'
+            'Cache-Control': 'no-cache',
+            'Access-Control-Allow-Origin': '*',
+            'Access-Control-Expose-Headers': 'Content-Range, Accept-Ranges, Content-Length'
         };
-        if (proxyRes.headers['content-length']) h['Content-Length'] = proxyRes.headers['content-length'];
-        if (proxyRes.headers['content-range']) h['Content-Range'] = proxyRes.headers['content-range'];
+        
+        if (proxyRes.headers['content-length']) {
+            h['Content-Length'] = proxyRes.headers['content-length'];
+        }
+        if (proxyRes.headers['content-range']) {
+            h['Content-Range'] = proxyRes.headers['content-range'];
+        }
+        
         res.writeHead(proxyRes.statusCode, h);
-        proxyRes.pipe(res);
-        proxyRes.on('error', () => res.end());
+        proxyRes.pipe(res, { end: true });
+        
+        proxyRes.on('error', (err) => {
+            console.error('Error en stream remoto:', err.message);
+            if (!res.headersSent) {
+                res.status(502).end();
+            } else {
+                res.end();
+            }
+        });
     });
-    proxyReq.on('error', () => !res.headersSent && res.status(502).end());
-    proxyReq.on('timeout', () => { proxyReq.destroy(); !res.headersSent && res.status(504).end(); });
-    req.on('close', () => proxyReq.destroy());
+    
+    proxyReq.on('error', (err) => {
+        console.error('Error en proxy:', err.message);
+        if (!res.headersSent) {
+            res.status(502).end();
+        }
+    });
+    
+    proxyReq.on('timeout', () => {
+        proxyReq.destroy();
+        if (!res.headersSent) {
+            res.status(504).end();
+        }
+    });
+    
+    req.on('close', () => {
+        proxyReq.destroy();
+    });
+    
     proxyReq.end();
 });
 
-app.get('/', (req, res) => res.send(`<!DOCTYPE html>
+const HTML = `<!DOCTYPE html>
 <html lang="es">
 <head>
 <meta charset="UTF-8">
@@ -748,7 +792,7 @@ const $=id=>document.getElementById(id);
 
 const state = {
     view: 'home',
-    zone: 'hdr',       // 'hdr' | 'cats' | 'grid'
+    zone: 'hdr',
     movieIdx: 0,
     currentList: [],
     activeCat: '',
@@ -1177,8 +1221,13 @@ function esc(s) { return s ? String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<
 </body>
 </html>`;
 
-app.get('/', (req, res) => { res.setHeader('Content-Type', 'text/html'); res.send(HTML); });
+app.get('/', (req, res) => {
+    res.setHeader('Content-Type', 'text/html');
+    res.send(HTML);
+});
+
 app.get('/health', (req, res) => res.json({ ok: true, movies: MOVIES_LIST.length }));
+
 app.use((req, res) => res.status(404).json({ error: 'Not found' }));
 
 app.listen(PORT, '0.0.0.0', () => {
