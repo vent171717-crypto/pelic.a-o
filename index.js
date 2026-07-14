@@ -3,960 +3,1199 @@ const path = require('path');
 const fs = require('fs');
 const http = require('http');
 const https = require('https');
+const compression = require('compression');
+const helmet = require('helmet');
+const rateLimit = require('express-rate-limit');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
-let MOVIES = [];
 
-try {
-    const data = JSON.parse(fs.readFileSync(path.join(__dirname, process.env.DATA_FILE || 'data.json'), 'utf8'));
-    MOVIES = data.map((m, i) => ({ id: i, title: m.title || 'Sin título', poster: m.logo || '', url: m.url || '' }));
-    console.log(`✓ ${MOVIES.length} películas`);
-} catch (e) { console.error('Error:', e.message); }
+const config = { DATA_FILE: process.env.DATA_FILE || 'data.json' };
+
+// ===== CATEGORÍAS =====
+const CATEGORIES = [
+    '2026',
+    'Acción',
+    'Adaptaciones de libros',
+    'Anime',
+    'Astrología',
+    'Cine de intriga',
+    'Clásicas',
+    'Cortos',
+    'De Hollywood',
+    'Deportes',
+    'Documentales',
+    'Dramas',
+    'En Español',
+    'Estados de ánimo',
+    'Fantasía',
+    'Fe y espiritualidad',
+    'Independientes',
+    'Internacionales',
+    'Latinoamericanas',
+    'Los favoritos de la crítica',
+    'Música y musicales',
+    'Orgullo',
+    'Para reír',
+    'Para ver en familia',
+    'Pelis policiales',
+    'Romances',
+    'Sci-fi',
+    'Terror',
+	'2025',
+	'2024',
+	'2023',
+	'2022',
+	'2021',
+	'2020',
+	'2019',
+	'2018',
+	'2017',
+	'2016',
+	'2015',
+	'2014',
+	'2013',
+	'2012',
+	'2011',
+	'2010',
+	'2009',
+	'2008',
+	'2007',
+	'2006',
+	'2005',
+	'2004',
+	'2003',
+	'2002',
+	'2001',
+	'2000',
+	'1999',
+	'1998',
+	'1997',
+	'1996',
+	'1995'
+		
+];
+
+const KEYWORDS = {
+
+    'Acción': [
+        'action','fight','battle','war','combat','mission','strike','assault','siege',
+        'agent','spy','heist','sniper','soldier','warrior','hunter','shooter','raid',
+        'force','fury','blaze','explosive','ambush','commando','operative','takeover',
+        'revenge','retaliation','attack','operation','invasion','resistance'
+    ],
+    
+      '2026': [
+        '2026','resistance'
+    ],
+    '2025': [
+        '2025','resistance'
+    ],
+	'2024': [
+        '2024','resistance'
+    ],
+	'2023': [
+        '2023','resistance'
+    ],
+	'2022': [
+        '2022','resistance'
+    ],
+    '2021': [
+        '2021','resistance'
+    ],
+	'2020': [
+        '2020','resistance'
+    ],
+	'2019': [
+        '2019','resistance'
+    ],
+	'2018': [
+        '2018','resistance'
+    ],
+	'2017': [
+        '2017','resistance'
+    ],
+	'2016': [
+        '2016','resistance'
+    ],
+	'2015': [
+        '2015','resistance'
+    ],
+	'2014': [
+        '2014','resistance'
+    ],
+	'2013': [
+        '2013','resistance'
+    ],
+	'2012': [
+        '2012','resistance'
+    ],
+	'2011': [
+        '2011','resistance'
+    ],
+	'2010': [
+        '2010','resistance'
+    ],
+	'2009': [
+        '2009','resistance'
+    ],
+	'2008': [
+        '2008','resistance'
+    ],
+	'2007': [
+        '2007','resistance'
+    ],
+	'2006': [
+        '2006','resistance'
+    ],
+	'2005': [
+        '2005','resistance'
+    ],
+	'2004': [
+        '2004','resistance'
+    ],
+	'2003': [
+        '2003','resistance'
+    ],
+	'2002': [
+        '2002','resistance'
+    ],
+	'2001': [
+        '2001','resistance'
+    ],
+	'2000': [
+        '2000','resistance'
+    ],
+	'1999': [
+        '1999','resistance'
+    ],
+	'1998': [
+        '1998','resistance'
+    ],
+	'1997': [
+        '1997','resistance'
+    ],
+	'1996': [
+        '1996','resistance'
+    ],
+	'1995': [
+        '1995','resistance'
+    ],
+	
+    
+    'Adaptaciones de libros': [
+        'based on','from the novel','the book','chapter','volume','adaptation',
+        'chronicles','saga','trilogy','part','book one','book two','tales of'
+    ],
+    'Anime': [
+        'anime','manga','shonen','shojo','ghibli','gundam','dragon ball','naruto',
+        'one piece','bleach','attack on titan','fullmetal','pokemon','digimon',
+        'sailor moon','my hero','demon slayer','jujutsu','isekai','kimetsu','kawaii',
+        'samurai','ninja','shinobi','otaku','sensei','san ','chan ','kun '
+    ],
+    'Astrología': [
+        'astro','horoscope','zodiac','star sign','cosmos','celestial','lunar','solar',
+        'universe','galaxy','constellation','planetary','spiritual astro','tarot'
+    ],
+    'Cine de intriga': [
+        'thriller','mystery','suspense','conspiracy','secret','hidden','unknown',
+        'vanish','disappear','unsolved','who killed','the truth','beneath','dark secret',
+        'intriga','enigma','suspect','alibi','witness','evidence','clue','twist'
+    ],
+    'Clásicas': [
+        '(1920)','(1930)','(1940)','(1950)','(1960)','(1970)','(1980)',
+        'classic','golden age','vintage','retro','old hollywood','b&w','black and white',
+        'chaplin','hitchcock','wilder','ford ','capra'
+    ],
+    'Cortos': [
+        'short film','short:','corto','short ','mini film','animated short'
+    ],
+    'De Hollywood': [
+        'marvel','dc ','avengers','batman','superman','spider','iron man',
+        'disney','pixar','dreamworks','paramount','warner','universal','sony pictures',
+        'blockbuster','superhero','franchise','cinematic universe','the sequel'
+    ],
+    'Deportes': [
+        'sport','football','soccer','basketball','baseball','tennis','olympics',
+        'athlete','champion','championship','race','marathon','boxing','wrestling',
+        'ufc','wwe','elimination chamber','gold medal','world cup','tournament',
+        'league','coach','team','player','game day','match','bout','fight night',
+        'swim','golf','hockey','cycling','skating'
+    ],
+    'Documentales': [
+        'documentary','true story','real story','inside','untold','story of',
+        'history of','revealed','exposed','behind the scenes','making of',
+        'investigation','report','the truth about','chronicles of','life of',
+        'portrait of','in conversation','journey through'
+    ],
+    'Dramas': [
+        'drama','family drama','grief','loss','sorrow','tears','struggle','survive',
+        'redemption','forgiveness','broken','healing','journey','life','hope',
+        'faith','believe','overcome','second chance','fresh start','new beginning'
+    ],
+    'En Español': [],
+    'Estados de ánimo': [
+        'mood','feeling','emotion','soul','heart','mind','spirit','inner','peace',
+        'calm','zen','meditat','breathe','wellbeing','balance','harmony','anxiety',
+        'depression','joy','happiness','sadness','melancholy','nostalgia'
+    ],
+    'Fantasía': [
+        'fantasy','magic','wizard','witch','dragon','elf','dwarf','fairy','enchanted',
+        'kingdom','realm','quest','sword','sorcery','myth','legend','fable','tale',
+        'magical','spellbound','prophecy','chosen one','ancient evil','dark lord',
+        'wand','potion','spell','curse','ring of','amulet','crystal'
+    ],
+    'Fe y espiritualidad': [
+        'faith','god','jesus','christian','church','prayer','miracle','blessing',
+        'holy','divine','scripture','bible','religious','spiritual','salvation',
+        'redemption','heaven','soul','worship','pastor','angel','chapel',
+        'can only imagine','testimony','revival','mission'
+    ],
+    'Independientes': [
+        'indie','independent','sundance','film festival','arthouse','art house',
+        'low budget','experimental','avant garde','short film','underground'
+    ],
+    'Internacionales': [],
+    'Latinoamericanas': [
+        'latino','latina','latin','colombia','mexico','argentina','peru','chile',
+        'venezuela','brasil','brazil','cuba','bolivia','ecuador','paraguay','uruguay',
+        'dominican','puerto rico','telenovela','cartel','narco','favela','barrio'
+    ],
+    'Los favoritos de la crítica': [
+        'award','oscar','golden globe','cannes','sundance','bafta','critic',
+        'acclaimed','masterpiece','cinematic','opus','magnum','prestige',
+        'nomination','winner','best picture','best film','palm d\'or'
+    ],
+    'Música y musicales': [
+        'music','musical','concert','song','songs','dance','dancer','singer',
+        'band','rock','jazz','pop','rhythm','melody','opera','symphony','choir',
+        'soundtrack','anthem','remix','album','tour','stage','perform',
+        'bts','elvis','taylor','beatles','queen','bohemian','rapsody','rap','hip hop',
+        'arirang','comeback live'
+    ],
+    'Orgullo': [
+        'lgbtq','pride','gay','lesbian','queer','transgender','bisexual','rainbow',
+        'drag','coming out','identity','love wins','same sex','two spirit'
+    ],
+    'Para reír': [
+        'comedy','funny','hilarious','humor','humour','joke','laughing','absurd',
+        'parody','satire','spoof','silly','goofy','awkward','mishap','blunder',
+        'prank','standup','stand-up','comedian','roast','wit','slapstick'
+    ],
+    'Para ver en familia': [
+        'family','kids','children','animation','animated','cartoon','pixar',
+        'adventure','journey','magical','wonder','imagination','bedtime','story',
+        'puppy','dog','cat','pet','animal','friend','school','young','teen',
+        'princess','prince','fairy tale','holiday special'
+    ],
+    'Pelis policiales': [
+        'police','cop','detective','crime','murder','homicide','investigation',
+        'fbi','cia','interpol','forensic','evidence','case','suspect','criminal',
+        'mafia','mob','gang','undercover','corrupt','justice','law','court',
+        'prison','inmate','escape','heist','robbery','theft','smuggling'
+    ],
+    'Romances': [
+        'love','romance','heart','kiss','wedding','bride','marriage','affair',
+        'valentine','sweetheart','beloved','passion','desire','soulmate',
+        'together','forever','couple','relationship','dating','proposal',
+        'engagement','honeymoon','love story','loving','falling for'
+    ],
+    'Sci-fi': [
+        'space','galaxy','star ','alien','robot','future','quantum','cyber',
+        'android','planet','universe','cosmos','asteroid','meteor','dimension',
+        'time travel','wormhole','spaceship','station','mars','moon','orbital',
+        'interstellar','intergalactic','extraterrestrial','artificial intelligence',
+        'clone','mutation','evolution','dystopia','utopia','cyberpunk','matrix'
+    ],
+    'Terror': [
+        'horror','terror','evil','ghost','haunted','zombie','vampire','witch',
+        'monster','demon','curse','darkness','nightmare','fear','blood','dead ',
+        'killer','scream','sinister','creep','paranormal','possession','haunting',
+        'supernatural','devil','satan','shadow','dread','chill','eerie','macabre',
+        'slasher','psycho','hellfire','plague','reaper','undead','exorcism',
+        'ritual','sacrifice','cult','occult','gravey','cemeter','coffin','crypt',
+        'gothic','creature','beast','werewolf','frankenstein','dracula'
+    ]
+};
+
+// Indicadores de español en el título
+const SPANISH_CHARS = /[áéíóúñüÁÉÍÓÚÑÜ¿¡]/;
+const SPANISH_WORDS = /\b(el|la|los|las|un|una|de|del|en|con|por|para|hasta|como|cuando|donde|amor|vida|noche|día|dia|corazón|corazon|tiempo|hombre|mujer|familia|tierra|luz|mar|sol|muerte|guerra|rey|reina|sangre|fuego|agua|sueño|verdad|mentira|secreto|camino)\b/i;
+
+function detectSpanish(title) {
+    return SPANISH_CHARS.test(title) || SPANISH_WORDS.test(title);
+}
+
+function categorizeMovie(item) {
+    // Si el JSON ya trae categoría, usarla directamente
+    if (item.category) {
+        const cats = Array.isArray(item.category) ? item.category : [item.category];
+        return cats.filter(c => CATEGORIES.includes(c));
+    }
+    if (item.genre) {
+        const genres = Array.isArray(item.genre) ? item.genre : [item.genre];
+        const matched = genres.filter(g => CATEGORIES.includes(g));
+        if (matched.length) return matched;
+    }
+
+    const t = (item.title || '').toLowerCase();
+    const found = [];
+
+    // Detección por palabras clave
+    for (const [cat, keys] of Object.entries(KEYWORDS)) {
+        if (cat === 'En Español' || cat === 'Internacionales') continue;
+        if (keys.some(k => t.includes(k.toLowerCase()))) {
+            found.push(cat);
+        }
+    }
+
+    // Detección de español
+    if (detectSpanish(item.title || '')) found.push('En Español');
+
+    // Latinoamericanas implica también Internacionales
+    if (found.includes('Latinoamericanas') && !found.includes('Internacionales')) {
+        found.push('Internacionales');
+    }
+
+    // Si tiene idioma distinto al inglés y no es español → Internacionales
+    if (item.language && item.language !== 'en' && item.language !== 'es') {
+        if (!found.includes('Internacionales')) found.push('Internacionales');
+    }
+
+    return found;
+}
+
+app.use(compression({
+    filter: (req, res) => {
+        if (req.path === '/video-proxy') return false;
+        if (req.headers.accept && (
+            req.headers.accept.includes('video') ||
+            req.headers.accept.includes('audio')
+        )) return false;
+        return compression.filter(req, res);
+    },
+    level: 6
+}));
+
+app.use(helmet({
+    contentSecurityPolicy: {
+        directives: {
+            defaultSrc: ["'self'"],
+            styleSrc: ["'self'", "'unsafe-inline'"],
+            scriptSrc: ["'self'", "'unsafe-inline'"],
+            imgSrc: ["'self'", "data:", "https:", "http:"],
+            mediaSrc: ["'self'", "blob:", "data:", "https:", "http:", "*"],
+            connectSrc: ["'self'", "https:", "http:", "*"]
+        }
+    },
+    crossOriginEmbedderPolicy: false,
+    crossOriginResourcePolicy: { policy: "cross-origin" }
+}));
+
+const videoProxyLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    max: 500,
+    skip: (req) => req.headers.range
+});
+
+let MOVIES_LIST = [];
+
+function loadData() {
+    try {
+        const jsonPath = path.join(__dirname, config.DATA_FILE);
+        if (!fs.existsSync(jsonPath)) return;
+        const data = JSON.parse(fs.readFileSync(jsonPath, 'utf8'));
+        if (!Array.isArray(data)) return;
+
+        MOVIES_LIST = data
+            .filter(item => item.title && item.url)
+            .map(item => ({
+                title: String(item.title).trim(),
+                logo: item.logo || '',
+                url: item.url || '',
+                categories: categorizeMovie(item)
+            }))
+            .sort((a, b) => a.title.localeCompare(b.title));
+
+        const catCounts = {};
+        MOVIES_LIST.forEach(m => m.categories.forEach(c => { catCounts[c] = (catCounts[c] || 0) + 1; }));
+        console.log('[OK] ' + MOVIES_LIST.length + ' películas');
+        console.log('[CATS]', Object.entries(catCounts).map(([k,v]) => k + ':' + v).join(', '));
+    } catch (e) { console.error('[ERROR]', e.message); }
+}
+
+loadData();
 
 app.use((req, res, next) => {
     res.setHeader('Access-Control-Allow-Origin', '*');
-    res.setHeader('Access-Control-Allow-Headers', 'Range');
-    res.setHeader('Access-Control-Expose-Headers', 'Content-Range,Accept-Ranges,Content-Length');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, HEAD, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Range, Content-Type, Accept');
+    res.setHeader('Access-Control-Expose-Headers', 'Content-Range, Accept-Ranges, Content-Length, Content-Type');
     if (req.method === 'OPTIONS') return res.sendStatus(204);
     next();
 });
 
-app.get('/api/movies', (req, res) => {
-    const { page = 0, limit = 200, q = '', random } = req.query;
-    let list = q ? MOVIES.filter(m => m.title.toLowerCase().includes(q.toLowerCase())) : [...MOVIES];
-    if (random === 'true') list.sort(() => Math.random() - 0.5);
-    const start = page * limit;
-    res.json({ total: list.length, hasMore: start + +limit < list.length, data: list.slice(start, start + +limit) });
+app.get('/api/stats', (req, res) => res.json({ movies: MOVIES_LIST.length }));
+
+app.get('/api/categories', (req, res) => {
+    const counts = {};
+    MOVIES_LIST.forEach(m => m.categories.forEach(c => { counts[c] = (counts[c] || 0) + 1; }));
+    res.json({
+        data: CATEGORIES.map(name => ({ name, count: counts[name] || 0 }))
+    });
 });
 
-// Proxy de video optimizado con mejor manejo de buffer
-app.get('/video-proxy', (req, res) => {
+app.get('/api/movies', (req, res) => {
+    const page = parseInt(req.query.page) || 0;
+    const limit = parseInt(req.query.limit) || 250;
+    const search = (req.query.q || '').toLowerCase();
+    const cat = req.query.cat || '';
+    const random = req.query.random === 'true';
+
+    let list = [...MOVIES_LIST];
+    if (cat) list = list.filter(m => m.categories.includes(cat));
+    if (search) list = list.filter(m => m.title.toLowerCase().includes(search));
+    if (random) for (let i = list.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [list[i], list[j]] = [list[j], list[i]]; }
+
+    const start = page * limit;
+    res.json({ total: list.length, page, hasMore: start + limit < list.length, data: list.slice(start, start + limit) });
+});
+
+app.get('/video-proxy', videoProxyLimiter, (req, res) => {
     const url = req.query.url;
-    if (!url) return res.status(400).end();
+    if (!url) return res.status(400).json({ error: 'URL requerida' });
+
     let parsed;
-    try { parsed = new URL(decodeURIComponent(url)); } catch { return res.status(400).end(); }
+    try {
+        parsed = new URL(decodeURIComponent(url));
+    } catch (e) {
+        return res.status(400).json({ error: 'URL inválida' });
+    }
+
     const client = parsed.protocol === 'https:' ? https : http;
-    const headers = { 
-        'User-Agent': 'Mozilla/5.0', 
-        'Accept': '*/*', 
-        'Accept-Encoding': 'identity',
-        'Referer': parsed.origin + '/',
-        'Connection': 'keep-alive'
-    };
-    if (req.headers.range) headers['Range'] = req.headers.range;
-    
-    const proxyReq = client.request({ 
-        hostname: parsed.hostname, 
-        port: parsed.port || (parsed.protocol === 'https:' ? 443 : 80), 
-        path: parsed.pathname + parsed.search, 
-        headers, 
-        timeout: 60000 // Aumentado a 60 segundos
-    }, proxyRes => {
-        if ([301, 302, 307, 308].includes(proxyRes.statusCode) && proxyRes.headers.location) {
-            proxyRes.destroy();
-            return res.redirect(307, '/video-proxy?url=' + encodeURIComponent(proxyRes.headers.location));
+    const opts = {
+        hostname: parsed.hostname,
+        port: parsed.port || (parsed.protocol === 'https:' ? 443 : 80),
+        path: parsed.pathname + parsed.search,
+        method: 'GET',
+        timeout: 120000,
+        headers: {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Accept': '*/*',
+            'Accept-Language': 'es-ES,es;q=0.9,en;q=0.8',
+            'Accept-Encoding': 'identity',
+            'Connection': 'keep-alive',
+            'Referer': parsed.origin + '/'
         }
-        const h = { 
-            'Content-Type': proxyRes.headers['content-type'] || 'video/mp4', 
+    };
+
+    if (req.headers.range) opts.headers['Range'] = req.headers.range;
+
+    const proxyReq = client.request(opts, proxyRes => {
+        if ([301, 302, 303, 307, 308].includes(proxyRes.statusCode) && proxyRes.headers.location) {
+            proxyRes.destroy();
+            return res.redirect('/video-proxy?url=' + encodeURIComponent(proxyRes.headers.location));
+        }
+        const headers = {
+            'Content-Type': proxyRes.headers['content-type'] || 'video/mp4',
             'Accept-Ranges': 'bytes',
-            'Cache-Control': 'no-cache'
+            'Cache-Control': 'public, max-age=3600',
+            'X-Content-Type-Options': 'nosniff'
         };
-        if (proxyRes.headers['content-length']) h['Content-Length'] = proxyRes.headers['content-length'];
-        if (proxyRes.headers['content-range']) h['Content-Range'] = proxyRes.headers['content-range'];
-        res.writeHead(proxyRes.statusCode, h);
-        proxyRes.pipe(res);
-        proxyRes.on('error', () => res.end());
+        if (proxyRes.headers['content-length']) headers['Content-Length'] = proxyRes.headers['content-length'];
+        if (proxyRes.headers['content-range']) headers['Content-Range'] = proxyRes.headers['content-range'];
+        res.writeHead(proxyRes.statusCode, headers);
+        proxyRes.pipe(res, { end: true });
+        proxyRes.on('error', (err) => {
+            if (!res.headersSent) res.status(502).json({ error: 'Stream error' });
+            else res.end();
+        });
     });
-    proxyReq.on('error', () => !res.headersSent && res.status(502).end());
-    proxyReq.on('timeout', () => { proxyReq.destroy(); !res.headersSent && res.status(504).end(); });
+
+    proxyReq.on('timeout', () => { proxyReq.destroy(); if (!res.headersSent) res.status(504).json({ error: 'Timeout' }); });
+    proxyReq.on('error', (err) => { if (!res.headersSent) res.status(502).json({ error: 'Connection error' }); });
     req.on('close', () => proxyReq.destroy());
     proxyReq.end();
 });
 
-app.get('/', (req, res) => res.send(`<!DOCTYPE html><html lang="es"><head>
-<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
-<title>Movies+</title><style>
+const HTML = `<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,user-scalable=no">
+<title>Stream+ Películas</title>
+<style>
 *{margin:0;padding:0;box-sizing:border-box;user-select:none;-webkit-tap-highlight-color:transparent}
-:root{--p:#f5c518;--bg:#0a0a0a;--s:#161616;--c:#1a1a1a;--b:#2a2a2a;--t:#e0e0e0;--t2:#888}
-html,body{background:var(--bg);color:var(--t);font-family:system-ui,sans-serif;height:100%;overflow:hidden}
+:root{--bg:#0a0a0a;--surface:#161616;--card:#1a1a1a;--border:#2a2a2a;--text:#e0e0e0;--text2:#707070;--accent:#c00;--focus:#fff}
+html,body{background:var(--bg);color:var(--text);font-family:-apple-system,system-ui,sans-serif;height:100%;overflow:hidden}
 #app{height:100%;display:flex;flex-direction:column}
-.hdr{display:flex;align-items:center;gap:10px;padding:12px;background:var(--s);border-bottom:1px solid var(--b)}
-.logo{color:var(--p);font-weight:700;font-size:18px;cursor:pointer;padding:4px 8px;border-radius:4px;transition:background 0.2s}
-.logo:hover,.logo.f{background:rgba(245,197,24,0.1)}
-.srch{flex:1;background:var(--bg);border:2px solid var(--b);color:var(--t);padding:10px;border-radius:8px;font-size:16px;outline:none;transition:border-color 0.2s}
-.srch:focus,.srch.f{border-color:var(--p)}
-.btn{background:var(--c);border:2px solid var(--b);color:var(--t);padding:10px 16px;border-radius:8px;font-weight:600;cursor:pointer;transition:all 0.2s}
-.btn:hover,.btn.f{background:var(--p);color:#000;border-color:var(--p)}
-.stats{color:var(--t2);font-size:12px;margin-left:auto}
-.main{flex:1;overflow-y:auto;padding:10px;-webkit-overflow-scrolling:touch}
-.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:8px}
-.card{position:relative;aspect-ratio:2/3;background:var(--c);border-radius:6px;overflow:hidden;border:2px solid transparent;cursor:pointer;transition:transform 0.15s, border-color 0.15s}
-.card:hover{transform:scale(1.02)}
-.card.f{border-color:var(--p);transform:scale(1.05);box-shadow:0 0 15px rgba(245,197,24,.3);z-index:10}
-.card img{width:100%;height:100%;object-fit:cover;background:linear-gradient(45deg,#1a1a1a 25%,#222 25%,#222 50%,#1a1a1a 50%,#1a1a1a 75%,#222 75%,#222);background-size:20px 20px;opacity:0;transition:opacity 0.3s ease-in-out}
-.card img.loaded{opacity:1}
-.card-t{position:absolute;bottom:0;left:0;right:0;padding:20px 6px 6px;background:linear-gradient(transparent,#000);font-size:11px;font-weight:600;opacity:0;transform:translateY(5px);transition:opacity 0.2s, transform 0.2s}
-.card.f .card-t{opacity:1;transform:translateY(0)}
+
+.hdr{display:flex;align-items:center;gap:12px;padding:12px 16px;background:var(--surface);border-bottom:1px solid var(--border)}
+.logo{color:var(--accent);font-weight:700;font-size:20px;letter-spacing:-1px;flex-shrink:0}
+.srch{flex:1;background:var(--bg);border:2px solid var(--border);color:var(--text);padding:10px 16px;border-radius:8px;font-size:14px;outline:none;min-width:0}
+.srch:focus,.srch.f{border-color:var(--focus)}
+.btn{background:var(--card);border:2px solid var(--border);color:var(--text);padding:10px 20px;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer;white-space:nowrap;flex-shrink:0}
+.btn.f{border-color:var(--focus)}
+.stats{color:var(--text2);font-size:12px;white-space:nowrap;flex-shrink:0}
+
+.cats-wrap{background:var(--surface);border-bottom:1px solid var(--border);position:relative}
+.cats{display:flex;gap:8px;padding:10px 16px;overflow-x:auto;scrollbar-width:none;-ms-overflow-style:none}
+.cats::-webkit-scrollbar{display:none}
+.cat{padding:7px 16px;background:var(--bg);border:2px solid var(--border);border-radius:20px;color:var(--text2);font-size:12px;font-weight:600;cursor:pointer;white-space:nowrap;flex-shrink:0;transition:border-color .1s}
+.cat.on{background:var(--accent);border-color:var(--accent);color:#fff}
+.cat.f{border-color:var(--focus);color:var(--text)}
+.cat.on.f{border-color:#fff;color:#fff}
+
+.main{flex:1;overflow-y:auto;padding:12px}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:10px}
+@media(min-width:900px){.grid{grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:12px}}
+@media(min-width:1400px){.grid{grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:14px}}
+
+.card{position:relative;aspect-ratio:2/3;background:var(--card);border-radius:6px;overflow:hidden;border:2px solid transparent;cursor:pointer}
+.card.f{border-color:var(--focus)}
+.card img{width:100%;height:100%;object-fit:cover;opacity:0}
+.card img.ok{opacity:1}
+.card img.err{opacity:.2}
+.card-t{position:absolute;bottom:0;left:0;right:0;padding:30px 8px 8px;background:linear-gradient(transparent,#000);font-size:12px;font-weight:600;opacity:0}
+.card.f .card-t{opacity:1}
+
 .player{position:fixed;inset:0;background:#000;z-index:200;display:none}
-.player.open{display:flex;flex-direction:column}
-video{flex:1;width:100%;background:#000}
-.p-ui{position:absolute;inset:0;display:flex;flex-direction:column;justify-content:space-between;opacity:1;transition:.2s;background:linear-gradient(#000a,transparent 15%,transparent 85%,#000a);pointer-events:none}
-.p-ui>*{pointer-events:auto}.p-ui.hide{opacity:0}.p-ui.hide>*{pointer-events:none}
-.p-top{padding:12px;padding-top:max(12px,env(safe-area-inset-top))}
-.p-title{font-size:14px;font-weight:600}
-.p-center{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);font-size:40px;font-weight:700;opacity:0;transition:.15s;pointer-events:none}
+.player.open{display:block}
+video{position:absolute;inset:0;width:100%;height:100%;object-fit:contain}
+
+.p-ui{position:absolute;inset:0;display:flex;flex-direction:column;justify-content:space-between;opacity:1;transition:opacity .15s}
+.p-ui.hide{opacity:0;pointer-events:none}
+
+.p-top{padding:16px 20px;background:linear-gradient(#000a,transparent)}
+.p-title{font-size:15px;font-weight:600}
+.p-status{font-size:12px;color:var(--text2);margin-top:4px}
+
+.p-center{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);font-size:48px;font-weight:700;opacity:0;transition:opacity .15s}
 .p-center.show{opacity:1}
-.p-bottom{padding:12px;padding-bottom:max(12px,env(safe-area-inset-bottom))}
-.p-prog{display:flex;align-items:center;gap:10px;margin-bottom:12px}
-.p-time{font-size:12px;min-width:45px}
-.p-bar{flex:1;height:5px;background:#444;border-radius:3px;position:relative;cursor:pointer}
-.p-bar-fill{position:absolute;left:0;top:0;height:100%;background:var(--p);border-radius:3px;transition:width 0.1s linear}
-.p-bar-buf{position:absolute;left:0;top:0;height:100%;background:#666;border-radius:3px;z-index:-1;transition:width 0.1s linear}
-.p-ctrl{display:flex;justify-content:center;gap:10px}
-.p-btn{width:44px;height:44px;background:rgba(255,255,255,.1);border:none;border-radius:50%;color:#fff;font-size:13px;font-weight:700;cursor:pointer;transition:background 0.2s}
-.p-btn:hover,.p-btn:active,.p-btn.f{background:var(--p);color:#000}
-.p-btn.main{width:52px;height:52px;font-size:18px}
-.p-load,.p-err{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);text-align:center;display:none}
-.p-load.show,.p-err.show{display:block}
-.p-spin{width:36px;height:36px;border:3px solid #333;border-top-color:var(--p);border-radius:50%;animation:spin .8s linear infinite;margin:0 auto 10px}
-.msg{text-align:center;padding:40px;color:var(--t2)}
-.msg.load::after{content:'';display:block;width:20px;height:20px;margin:12px auto 0;border:2px solid #333;border-top-color:var(--p);border-radius:50%;animation:spin .8s linear infinite}
+
+.p-vol{position:absolute;right:30px;top:50%;transform:translateY(-50%);display:flex;flex-direction:column;align-items:center;gap:8px;opacity:0;transition:opacity .15s}
+.p-vol.show{opacity:1}
+.p-vol-bar{width:6px;height:100px;background:#333;border-radius:3px;position:relative}
+.p-vol-fill{position:absolute;bottom:0;left:0;right:0;background:var(--accent);border-radius:3px}
+.p-vol-pct{font-size:13px;font-weight:600}
+
+.p-bottom{padding:16px 20px 20px;background:linear-gradient(transparent,#000a)}
+.p-prog{display:flex;align-items:center;gap:12px;margin-bottom:16px}
+.p-time{font-size:13px;font-weight:500;min-width:50px}
+.p-time:last-child{text-align:right}
+.p-bar{flex:1;height:4px;background:#444;border-radius:2px;position:relative;cursor:pointer}
+.p-bar.f{height:6px;box-shadow:0 0 0 2px var(--focus)}
+.p-bar-fill{position:absolute;left:0;top:0;height:100%;background:var(--accent);border-radius:2px;z-index:2}
+.p-bar-buf{position:absolute;left:0;top:0;height:100%;background:#666;border-radius:2px;z-index:1}
+.p-bar-dot{position:absolute;top:50%;transform:translate(-50%,-50%);width:14px;height:14px;background:#fff;border-radius:50%;opacity:0;z-index:3}
+.p-bar.f .p-bar-dot{opacity:1}
+
+.p-ctrl{display:flex;justify-content:center;gap:12px}
+.p-btn{width:48px;height:48px;background:transparent;border:2px solid transparent;border-radius:50%;color:#fff;font-size:14px;font-weight:700;cursor:pointer;display:flex;align-items:center;justify-content:center}
+.p-btn.f{border-color:var(--focus);background:#222}
+.p-btn.main{width:56px;height:56px;background:#222;font-size:16px}
+.p-btn.main.f{background:var(--accent);border-color:var(--accent)}
+
+.p-next{position:absolute;bottom:120px;right:20px;background:#111;border:1px solid var(--border);border-radius:10px;padding:16px 20px;display:none;max-width:280px}
+.p-next.show{display:block}
+.p-next-lbl{font-size:11px;color:var(--text2);text-transform:uppercase;margin-bottom:6px}
+.p-next-t{font-size:14px;font-weight:600;margin-bottom:4px}
+.p-next-cd{font-size:12px;color:var(--accent);margin-bottom:12px}
+.p-next-btns{display:flex;gap:8px}
+.p-next-btn{padding:8px 16px;border-radius:6px;font-size:12px;font-weight:600;cursor:pointer;border:2px solid transparent}
+.p-next-btn.f{border-color:var(--focus)}
+.p-next-btn.pri{background:var(--accent);color:#fff}
+.p-next-btn.sec{background:transparent;color:var(--text);border-color:var(--border)}
+
+.p-err{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);text-align:center;display:none}
+.p-err.show{display:block}
+.p-err-t{font-size:16px;margin-bottom:8px}
+.p-err-sub{font-size:12px;color:var(--text2);margin-bottom:16px}
+.p-err-btn{padding:12px 24px;background:var(--accent);border:2px solid transparent;border-radius:8px;color:#fff;font-size:14px;font-weight:600;cursor:pointer;margin:4px}
+.p-err-btn.f{border-color:var(--focus)}
+.p-err-btn.sec{background:transparent;border-color:var(--border)}
+
+.p-load{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);display:none;text-align:center}
+.p-load.show{display:block}
+.p-load-spin{width:40px;height:40px;border:3px solid #333;border-top-color:var(--accent);border-radius:50%;animation:spin .8s linear infinite;margin:0 auto 12px}
+.p-load-txt{font-size:12px;color:var(--text2)}
+
+.msg{text-align:center;padding:60px 20px;color:var(--text2)}
+.msg.load::after{content:'';display:block;width:24px;height:24px;margin:16px auto 0;border:2px solid #333;border-top-color:var(--accent);border-radius:50%;animation:spin .8s linear infinite}
+
 @keyframes spin{to{transform:rotate(360deg)}}
-@keyframes fadeIn{from{opacity:0}to{opacity:1}}
-</style></head><body><div id="app">
-<div class="hdr">
-    <div class="logo f" id="logo">MOVIES+</div>
-    <input class="srch" id="srch" placeholder="Buscar..." autocomplete="off">
-    <button class="btn" id="mix">🎲</button>
-    <span class="stats" id="stats"></span>
+</style>
+</head>
+<body>
+<div id="app">
+    <div class="hdr">
+        <div class="logo">STREAM+</div>
+        <input class="srch" id="srch" placeholder="Buscar película...">
+        <button class="btn" id="mix">Aleatorio</button>
+        <span class="stats" id="stats"></span>
+    </div>
+
+    <div class="cats-wrap">
+        <div class="cats" id="cats">
+            <button class="cat on" data-cat="">Todas</button>
+            <button class="cat" data-cat="Acción">Acción</button>
+            <button class="cat" data-cat="Adaptaciones de libros">Adaptaciones de libros</button>
+            <button class="cat" data-cat="Anime">Anime</button>
+            <button class="cat" data-cat="Astrología">Astrología</button>
+            <button class="cat" data-cat="Cine de intriga">Cine de intriga</button>
+            <button class="cat" data-cat="Clásicas">Clásicas</button>
+            <button class="cat" data-cat="Cortos">Cortos</button>
+            <button class="cat" data-cat="De Hollywood">De Hollywood</button>
+            <button class="cat" data-cat="Deportes">Deportes</button>
+            <button class="cat" data-cat="Documentales">Documentales</button>
+            <button class="cat" data-cat="Dramas">Dramas</button>
+            <button class="cat" data-cat="En Español">En Español</button>
+            <button class="cat" data-cat="Estados de ánimo">Estados de ánimo</button>
+            <button class="cat" data-cat="Fantasía">Fantasía</button>
+            <button class="cat" data-cat="Fe y espiritualidad">Fe y espiritualidad</button>
+            <button class="cat" data-cat="Independientes">Independientes</button>
+            <button class="cat" data-cat="Internacionales">Internacionales</button>
+            <button class="cat" data-cat="Latinoamericanas">Latinoamericanas</button>
+            <button class="cat" data-cat="Los favoritos de la crítica">Los favoritos de la crítica</button>
+            <button class="cat" data-cat="Música y musicales">Música y musicales</button>
+            <button class="cat" data-cat="Orgullo">Orgullo</button>
+            <button class="cat" data-cat="Para reír">Para reír</button>
+            <button class="cat" data-cat="Para ver en familia">Para ver en familia</button>
+            <button class="cat" data-cat="Pelis policiales">Pelis policiales</button>
+            <button class="cat" data-cat="Romances">Romances</button>
+            <button class="cat" data-cat="Sci-fi">Sci-fi</button>
+            <button class="cat" data-cat="Terror">Terror</button>
+			<button class="cat" data-cat="2026">2026</button>
+			<button class="cat" data-cat="2025">2025</button>
+			<button class="cat" data-cat="2024">2024</button>
+			<button class="cat" data-cat="2023">2023</button>
+			<button class="cat" data-cat="2022">2022</button>
+			<button class="cat" data-cat="2021">2021</button>
+			<button class="cat" data-cat="2020">2020</button>
+			<button class="cat" data-cat="2019">2019</button>
+			<button class="cat" data-cat="2018">2018</button>
+			<button class="cat" data-cat="2017">2017</button>			
+			<button class="cat" data-cat="2016">2016</button>
+			<button class="cat" data-cat="2015">2015</button>
+			<button class="cat" data-cat="2014">2014</button>
+			<button class="cat" data-cat="2013">2013</button>
+			<button class="cat" data-cat="2012">2012</button>
+			<button class="cat" data-cat="2011">2011</button>
+			<button class="cat" data-cat="2010">2010</button>
+			<button class="cat" data-cat="2009">2009</button>
+			<button class="cat" data-cat="2008">2008</button>
+			<button class="cat" data-cat="2007">2007</button>
+			<button class="cat" data-cat="2006">2006</button>
+			<button class="cat" data-cat="2005">2005</button>
+			<button class="cat" data-cat="2004">2004</button>
+			<button class="cat" data-cat="2003">2003</button>
+			<button class="cat" data-cat="2002">2002</button>
+			<button class="cat" data-cat="2001">2001</button>
+			<button class="cat" data-cat="2000">2000</button>
+			<button class="cat" data-cat="1999">1999</button>
+			<button class="cat" data-cat="1998">1998</button>
+			<button class="cat" data-cat="1997">1997</button>
+			<button class="cat" data-cat="1996">1996</button>
+			<button class="cat" data-cat="1995">1995</button>
+			
+        </div>
+    </div>
+
+    <div class="main" id="main">
+        <div class="grid" id="grid"><div class="msg load">Cargando</div></div>
+    </div>
+
+    <div class="player" id="player">
+        <video id="vid" playsinline preload="auto"></video>
+        <div class="p-load" id="p-load">
+            <div class="p-load-spin"></div>
+            <div class="p-load-txt" id="p-load-txt">Cargando...</div>
+        </div>
+        <div class="p-err" id="p-err">
+            <div class="p-err-t">Error de reproducción</div>
+            <div class="p-err-sub" id="p-err-sub">No se pudo cargar el video</div>
+            <button class="p-err-btn" id="p-retry">Reintentar</button>
+            <button class="p-err-btn sec" id="p-back">Volver</button>
+        </div>
+        <div class="p-center" id="p-ind"></div>
+        <div class="p-vol" id="p-vol">
+            <div class="p-vol-pct" id="p-vol-pct">100%</div>
+            <div class="p-vol-bar"><div class="p-vol-fill" id="p-vol-fill" style="height:100%"></div></div>
+        </div>
+        <div class="p-ui" id="p-ui">
+            <div class="p-top">
+                <div class="p-title" id="p-title"></div>
+                <div class="p-status" id="p-status"></div>
+            </div>
+            <div class="p-next" id="p-next">
+                <div class="p-next-lbl">Siguiente película</div>
+                <div class="p-next-t" id="p-next-t"></div>
+                <div class="p-next-cd" id="p-next-cd"></div>
+                <div class="p-next-btns">
+                    <button class="p-next-btn pri" id="p-next-play">Reproducir</button>
+                    <button class="p-next-btn sec" id="p-next-cancel">Cancelar</button>
+                </div>
+            </div>
+            <div class="p-bottom">
+                <div class="p-prog">
+                    <span class="p-time" id="p-cur">0:00</span>
+                    <div class="p-bar" id="p-bar">
+                        <div class="p-bar-buf" id="p-bar-buf"></div>
+                        <div class="p-bar-fill" id="p-bar-fill"></div>
+                        <div class="p-bar-dot" id="p-bar-dot"></div>
+                    </div>
+                    <span class="p-time" id="p-dur">0:00</span>
+                </div>
+                <div class="p-ctrl">
+                    <button class="p-btn" id="p-prev">PREV</button>
+                    <button class="p-btn" id="p-rw">-10</button>
+                    <button class="p-btn main" id="p-pp">PLAY</button>
+                    <button class="p-btn" id="p-fw">+10</button>
+                    <button class="p-btn" id="p-nxt">NEXT</button>
+                </div>
+            </div>
+        </div>
+    </div>
 </div>
-<div class="main" id="main"><div class="grid" id="grid"><div class="msg load">Cargando</div></div></div>
-<div class="player" id="player">
-<video id="vid" playsinline webkit-playsinline preload="auto"></video>
-<div class="p-load" id="pLoad"><div class="p-spin"></div><div id="pLoadTxt">Cargando...</div></div>
-<div class="p-err" id="pErr"><div>Error</div><div style="font-size:11px;color:#888;margin:8px 0" id="pErrTxt"></div><button class="btn" id="pRetry">Reintentar</button> <button class="btn" id="pBack">Volver</button></div>
-<div class="p-center" id="pInd"></div>
-<div class="p-ui" id="pUi">
-<div class="p-top"><div class="p-title" id="pTitle"></div></div>
-<div class="p-bottom">
-<div class="p-prog"><span class="p-time" id="pCur">0:00</span><div class="p-bar" id="pBar"><div class="p-bar-buf" id="pBuf"></div><div class="p-bar-fill" id="pFill"></div></div><span class="p-time" id="pDur">0:00</span></div>
-<div class="p-ctrl"><button class="p-btn" id="pRw">-10</button><button class="p-btn main" id="pPp">▶</button><button class="p-btn" id="pFw">+10</button></div>
-</div></div></div></div>
 <script>
 (function(){
 const $=id=>document.getElementById(id);
-const el={
-    logo:$('logo'), grid:$('grid'), main:$('main'), srch:$('srch'), mix:$('mix'), stats:$('stats'),
-    player:$('player'), vid:$('vid'), pUi:$('pUi'), pTitle:$('pTitle'), pLoad:$('pLoad'), 
-    pLoadTxt:$('pLoadTxt'), pErr:$('pErr'), pErrTxt:$('pErrTxt'), pInd:$('pInd'), pBar:$('pBar'), 
-    pFill:$('pFill'), pBuf:$('pBuf'), pCur:$('pCur'), pDur:$('pDur'), pRw:$('pRw'), pPp:$('pPp'), 
-    pFw:$('pFw'), pRetry:$('pRetry'), pBack:$('pBack')
+
+const state = {
+    view: 'home',
+    zone: 'hdr',       // 'hdr' | 'cats' | 'grid'
+    movieIdx: 0,
+    currentList: [],
+    activeCat: '',
+    page: 0,
+    hasMore: true,
+    loading: false,
+    cols: 5,
+    focused: null,
+    playing: false,
+    lastFocused: { hdr: null, cats: null, grid: null },
+    retryCount: 0,
+    maxRetries: 3
 };
 
-const S={
-    view:'home', movies:[], focus:null, lastFocus:null, playing:false, retry:0,
-    imgObserver:null, gridCols:0, currentIndex:-1,
-    headerElements:[], // Logo, Search, Mix - en orden de navegación
-    headerIndex:0 // Índice actual en el header
+let hideT, volT, indT, nextT, bufferCheckT;
+
+const el = {
+    grid: $('grid'), main: $('main'), srch: $('srch'), mix: $('mix'), stats: $('stats'),
+    cats: $('cats'),
+    player: $('player'), vid: $('vid'), pUi: $('p-ui'), pTitle: $('p-title'), pStatus: $('p-status'),
+    pLoad: $('p-load'), pLoadTxt: $('p-load-txt'), pErr: $('p-err'), pErrSub: $('p-err-sub'), pRetry: $('p-retry'), pBack: $('p-back'),
+    pInd: $('p-ind'), pVol: $('p-vol'), pVolFill: $('p-vol-fill'), pVolPct: $('p-vol-pct'),
+    pBar: $('p-bar'), pBarFill: $('p-bar-fill'), pBarBuf: $('p-bar-buf'), pBarDot: $('p-bar-dot'),
+    pCur: $('p-cur'), pDur: $('p-dur'),
+    pPrev: $('p-prev'), pRw: $('p-rw'), pPp: $('p-pp'), pFw: $('p-fw'), pNxt: $('p-nxt'),
+    pNext: $('p-next'), pNextT: $('p-next-t'), pNextCd: $('p-next-cd'), pNextPlay: $('p-next-play'), pNextCancel: $('p-next-cancel')
 };
 
-// ===== INICIALIZACIÓN =====
-history.replaceState({v:'home'},'','#home');
-window.onpopstate=()=>{if(S.view==='player'){closeP();history.pushState({v:'home'},'','#home')}};
+// ===== INIT =====
+function initHistory() {
+    history.replaceState({ view: 'home' }, '', '#home');
+    window.addEventListener('popstate', () => { if (state.view === 'player') closePlayerInternal(); });
+}
+function pushView(v) { history.pushState({ view: v }, '', '#' + v); }
 
-function init() {
-    // Configurar elementos del header
-    S.headerElements = [el.logo, el.srch, el.mix];
+initHistory();
+fetch('/api/stats').then(r => r.json()).then(d => { el.stats.textContent = d.movies + ' películas'; }).catch(() => {});
+load(false, false);
+calcCols();
+window.addEventListener('resize', calcCols);
+document.addEventListener('keydown', onKey, true);
+setupPlayer();
+setupMouse();
+setTimeout(() => focusZone('hdr'), 300);
 
-    // Configurar el video para mejor reproducción
-    el.vid.preload = 'auto';
-    el.vid.buffer = true;
+// ===== CATEGORÍAS =====
+[...el.cats.querySelectorAll('.cat')].forEach(btn => {
+    btn.addEventListener('click', () => selectCat(btn));
+});
 
-    fetch('/api/movies?limit=200&random=true').then(r=>r.json()).then(d=>{
-        el.stats.textContent=d.total+' películas';
-        el.grid.innerHTML='';
-        S.movies=d.data;
-        d.data.forEach(m=>el.grid.appendChild(mkCard(m)));
-
-        // Calcular columnas del grid
-        calculateGridColumns();
-
-        // Inicializar lazy loading
-        initLazyLoading();
-
-        // Enfocar logo inicialmente
-        setFocusHeader(0);
-
-    }).catch(()=>el.grid.innerHTML='<div class="msg">Error</div>');
+function selectCat(btn) {
+    [...el.cats.querySelectorAll('.cat')].forEach(b => b.classList.remove('on'));
+    btn.classList.add('on');
+    state.activeCat = btn.dataset.cat;
+    el.srch.value = '';
+    load(false, false);
 }
 
-// ===== LAZY LOADING CON ANIMACIÓN SUAVE =====
-function initLazyLoading() {
-    if(S.imgObserver) S.imgObserver.disconnect();
-
-    S.imgObserver = new IntersectionObserver((entries) => {
-        entries.forEach(entry => {
-            if(entry.isIntersecting){
-                const img = entry.target;
-                if(img.dataset.src && !img.classList.contains('loaded')) {
-                    loadImageWithAnimation(img);
-                }
-                S.imgObserver.unobserve(img);
-            }
-        });
-    }, {
-        rootMargin: '300px 0px', // Cargar antes de que entren al viewport
-        threshold: 0.01
-    });
-
-    // Observar todas las imágenes
-    document.querySelectorAll('.card img[data-src]').forEach(img => {
-        S.imgObserver.observe(img);
-    });
+// ===== LAYOUT =====
+function calcCols() {
+    const c = el.grid.querySelector('.card');
+    if (c) { const w = el.grid.offsetWidth, cw = c.offsetWidth + 10; state.cols = Math.max(1, Math.floor(w / cw)); }
 }
 
-function loadImageWithAnimation(img) {
-    if(!img.dataset.src) return;
-
-    const src = img.dataset.src;
-    const imgEl = new Image();
-
-    imgEl.onload = () => {
-        img.src = src;
-        // Forzar reflow para activar la animación
-        void img.offsetWidth;
-        img.classList.add('loaded');
-        img.style.background = 'none';
-    };
-
-    imgEl.onerror = () => {
-        // Usar placeholder SVG con animación
-        img.src = 'data:image/svg+xml;base64,' + btoa(
-            '<svg xmlns="http://www.w3.org/2000/svg" width="130" height="195" viewBox="0 0 130 195">' +
-            '<rect width="130" height="195" fill="#1a1a1a"/>' +
-            '<text x="65" y="95" font-family="Arial" font-size="12" fill="#888" text-anchor="middle">Sin imagen</text>' +
-            '</svg>'
-        );
-        img.classList.add('loaded');
-        img.style.background = 'none';
-    };
-
-    // Reducido de 100 a 20ms para carga más rápida
-    setTimeout(() => {
-        imgEl.src = src;
-    }, 20);
+// ===== FOCUS SYSTEM =====
+function focus(elem) {
+    if (state.focused) state.focused.classList.remove('f');
+    state.focused = elem;
+    if (elem) { elem.classList.add('f'); elem.scrollIntoView({ block: 'nearest', inline: 'nearest' }); }
 }
 
-function preloadAdjacentImages(index) {
-    const cards = getCardsFast();
-    if(!cards.length) return;
-
-    // Cargar imágenes en un radio de 2 elementos
-    for(let i = Math.max(0, index - 2); i <= Math.min(cards.length - 1, index + 2); i++) {
-        const img = cards[i].querySelector('img[data-src]');
-        if(img && img.dataset.src && !img.classList.contains('loaded')) {
-            loadImageWithAnimation(img);
-        }
+function focusZone(zone) {
+    state.zone = zone;
+    if (zone === 'hdr') {
+        const prev = state.lastFocused.hdr;
+        const items = [el.srch, el.mix];
+        focus(prev && items.includes(prev) ? prev : el.srch);
+    } else if (zone === 'cats') {
+        const prev = state.lastFocused.cats;
+        const cats = [...el.cats.querySelectorAll('.cat')];
+        const active = cats.find(c => c.classList.contains('on'));
+        focus(prev && cats.includes(prev) ? prev : active || cats[0]);
+    } else if (zone === 'grid') {
+        const prev = state.lastFocused.grid;
+        const cards = [...el.grid.querySelectorAll('.card')].filter(e => e.offsetParent);
+        focus(prev && cards.includes(prev) ? prev : cards[0]);
     }
 }
 
-// ===== SISTEMA DE NAVEGACIÓN UNIFICADO =====
-function getCards() {
-    return [...el.grid.querySelectorAll('.card')];
+function saveFocus() {
+    if (state.zone === 'hdr') state.lastFocused.hdr = state.focused;
+    else if (state.zone === 'cats') state.lastFocused.cats = state.focused;
+    else if (state.zone === 'grid') state.lastFocused.grid = state.focused;
 }
 
-function calculateGridColumns() {
-    const grid = el.grid;
-    if(!grid.children.length) {
-        S.gridCols = 0;
-        return;
-    }
-
-    // Método simple: contar elementos en la primera fila
-    const firstCard = grid.children[0];
-    const firstRect = firstCard.getBoundingClientRect();
-    let cols = 1;
-
-    for(let i = 1; i < grid.children.length; i++) {
-        const rect = grid.children[i].getBoundingClientRect();
-        if(Math.abs(rect.top - firstRect.top) < 10) {
-            cols++;
-        } else {
-            break;
-        }
-    }
-
-    S.gridCols = Math.max(1, cols);
-}
-
-// ===== MANEJO DE FOCUS OPTIMIZADO =====
-// Cache de cards para evitar querySelector repetitivo
-let cachedCards = [];
-
-function refreshCardCache() {
-    cachedCards = el.grid.querySelectorAll('.card');
-}
-
-function getCardsFast() {
-    return cachedCards;
-}
-
-function setFocusHeader(index) {
-    if(index < 0) index = 0;
-    if(index >= S.headerElements.length) index = S.headerElements.length - 1;
-
-    // Remover focus anterior
-    if(S.focus && S.focus.classList) S.focus.classList.remove('f');
-
-    // Actualizar estado
-    S.headerIndex = index;
-    S.focus = S.headerElements[index];
-    S.currentIndex = -1; // Resetear índice de grid
-
-    // Aplicar focus
-    S.focus.classList.add('f');
-
-    // Focus nativo para input
-    if(S.focus === el.srch) {
-        el.srch.focus();
-        // Seleccionar texto para búsqueda rápida
-        el.srch.select();
-    } else {
-        el.srch.blur();
-    }
-}
-
-function setFocusGrid(index) {
-    const cards = getCardsFast();
-    if(index < 0) index = 0;
-    if(index >= cards.length) index = cards.length - 1;
-    if(!cards.length) return;
-
-    // Remover focus anterior
-    if(S.focus && S.focus.classList) S.focus.classList.remove('f');
-
-    // Actualizar estado
-    S.currentIndex = index;
-    S.focus = cards[index];
-    S.headerIndex = -1; // Resetear índice de header
-
-    // Aplicar focus
-    cards[index].classList.add('f');
-
-    // Scroll instantáneo (sin animación para mayor velocidad)
-    const card = cards[index];
-    const mainRect = el.main.getBoundingClientRect();
-    const cardRect = card.getBoundingClientRect();
-
-    if(cardRect.top < mainRect.top || cardRect.bottom > mainRect.bottom) {
-        card.scrollIntoView({block: 'nearest', behavior: 'auto'});
-    }
-
-    // Pre-cargar imágenes adyacentes
-    preloadAdjacentImages(index);
-}
-
-function navigateGrid(direction) {
-    const cards = getCardsFast();
-    if(!cards.length) return false;
-
-    let newIndex = S.currentIndex;
-
-    switch(direction) {
-        case 'up':
-            if(S.currentIndex < S.gridCols) {
-                // Ir al header (botón mix)
-                setFocusHeader(2);
-                return true;
-            }
-            newIndex = Math.max(0, S.currentIndex - S.gridCols);
-            break;
-        case 'down':
-            newIndex = Math.min(cards.length - 1, S.currentIndex + S.gridCols);
-            break;
-        case 'left':
-            if(S.currentIndex % S.gridCols === 0) {
-                // Primera columna, ir al header (search)
-                setFocusHeader(1);
-                return true;
-            }
-            newIndex = Math.max(0, S.currentIndex - 1);
-            break;
-        case 'right':
-            if((S.currentIndex + 1) % S.gridCols === 0 || S.currentIndex === cards.length - 1) {
-                // Última columna, no hacer nada o loop
-                return false;
-            }
-            newIndex = Math.min(cards.length - 1, S.currentIndex + 1);
-            break;
-    }
-
-    if(newIndex !== S.currentIndex) {
-        setFocusGrid(newIndex);
-        return true;
-    }
-
-    return false;
-}
-
-function navigateHeader(direction) {
-    let newIndex = S.headerIndex;
-
-    switch(direction) {
-        case 'left':
-            newIndex = Math.max(0, S.headerIndex - 1);
-            break;
-        case 'right':
-            newIndex = Math.min(S.headerElements.length - 1, S.headerIndex + 1);
-            break;
-        case 'down':
-            // Ir a la primera card del grid
-            const cards = getCardsFast();
-            if(cards.length > 0) {
-                setFocusGrid(0);
-                return true;
-            }
-            break;
-        case 'up':
-            // No hay nada arriba del header
-            return false;
-    }
-
-    if(newIndex !== S.headerIndex) {
-        setFocusHeader(newIndex);
-        return true;
-    }
-
-    return false;
-}
-
-// ===== MANEJO DE TECLADO ULTRA RÁPIDO =====
-let lastKeyTime = 0;
-let pendingKey = null;
-
-document.onkeydown = e => {
+// ===== KEYBOARD =====
+function onKey(e) {
     const k = e.key;
+    const navKeys = ['ArrowUp','ArrowDown','ArrowLeft','ArrowRight','Enter',' '];
+    if (navKeys.includes(k)) { e.preventDefault(); e.stopPropagation(); }
 
-    // Prevenir comportamiento por defecto para teclas de navegación
-    if(['ArrowUp','ArrowDown','ArrowLeft','ArrowRight','Enter',' ','Escape','Backspace','Tab'].includes(k)){
-        e.preventDefault();
-        e.stopPropagation();
-    }
+    if (state.view === 'player') { playerKey(k); return; }
 
-    // Debounce más agresivo (30ms)
-    const now = Date.now();
-    if (now - lastKeyTime < 30) {
-        return;
-    }
-    lastKeyTime = now;
-
-    if(S.view === 'player'){
-        playerKey(k);
+    if (document.activeElement === el.srch) {
+        if (k === 'ArrowDown') { el.srch.blur(); saveFocus(); focusZone('cats'); }
         return;
     }
 
-    // Evitar que Tab cambie el focus
-    if(k === 'Tab') {
-        e.preventDefault();
-        if(S.focus === el.srch) {
-            navigateHeader('right');
-        } else {
-            setFocusHeader(0);
-        }
-        return;
-    }
-
-    nav(k);
-};
-
-function nav(k) {
-    // Activar elemento seleccionado
-    if(k === 'Enter' || k === ' ') {
-        if(S.focus === el.logo) {
-            location.reload();
-        } else if(S.focus === el.srch) {
-            el.srch.focus();
-            if(el.srch.value.trim()) {
-                loadMovies(false);
-            }
-        } else if(S.focus === el.mix) {
-            loadMovies(true);
-        } else if(S.focus && S.focus.classList.contains('card')) {
-            const idx = Array.from(el.grid.querySelectorAll('.card')).indexOf(S.focus);
-            if(idx >= 0 && S.movies[idx]) play(S.movies[idx]);
-        }
-        return;
-    }
-
-    if(k === 'Escape') {
-        if(el.srch.value.trim()) {
-            el.srch.value = '';
-            loadMovies(false);
-        } else if(S.currentIndex >= 0) {
-            setFocusHeader(2);
-        }
-        return;
-    }
-
-    if(k === 'Backspace') {
-        if(S.focus === el.srch && el.srch.value.length > 0) {
-            return;
-        } else if(S.currentIndex >= 0) {
-            setFocusHeader(2);
-        }
-        return;
-    }
-
-    if(['ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(k)) {
-        const direction = k.toLowerCase().replace('arrow', '');
-
-        if(S.currentIndex >= 0) {
-            if(!navigateGrid(direction) && direction === 'right') {
-                setFocusHeader(0);
-            }
-        } else if(S.headerIndex >= 0) {
-            if(!navigateHeader(direction) && direction === 'left' && S.headerIndex === 0) {
-                const cards = getCardsFast();
-                if(cards.length > 0) {
-                    setFocusGrid(cards.length - 1);
-                }
-            }
-        } else {
-            setFocusHeader(0);
-        }
+    switch (k) {
+        case 'ArrowUp':    moveUp(); break;
+        case 'ArrowDown':  moveDown(); break;
+        case 'ArrowLeft':  moveLeft(); break;
+        case 'ArrowRight': moveRight(); break;
+        case 'Enter': case ' ': activate(); break;
     }
 }
 
-// Eventos de focus para elementos del header
-el.logo.addEventListener('focus', () => setFocusHeader(0));
-el.srch.addEventListener('focus', () => setFocusHeader(1));
-el.mix.addEventListener('focus', () => setFocusHeader(2));
-
-// Clic en logo para recargar
-el.logo.addEventListener('click', () => location.reload());
-
-// ===== BÚSQUEDA Y CARGA DE PELÍCULAS ULTRA RÁPIDA =====
-let searchTimer;
-el.srch.oninput = () => {
-    clearTimeout(searchTimer);
-    searchTimer = setTimeout(() => loadMovies(false), 200); // Reducido de 300 a 200ms
-};
-
-el.mix.onclick = () => loadMovies(true);
-
-function loadMovies(random) {
-    // Mostrar mensaje de carga sin pantalla negra
-    const currentGrid = el.grid.innerHTML;
-    el.grid.innerHTML = '<div class="msg load">Cargando...</div>';
-    
-    const q = el.srch.value.trim();
-    fetch('/api/movies?limit=200' + (q ? '&q=' + encodeURIComponent(q) : '') + (random ? '&random=true' : ''))
-        .then(r => r.json())
-        .then(d => {
-            el.grid.innerHTML = '';
-            S.movies = d.data;
-            S.currentIndex = -1;
-
-            // Crear todas las cards instantáneamente
-            const fragment = document.createDocumentFragment();
-            d.data.forEach(m => {
-                fragment.appendChild(mkCard(m));
-            });
-            el.grid.appendChild(fragment);
-            
-            // Actualizar cache de cards
-            refreshCardCache();
-
-            // Calcular columnas y cargar imágenes
-            calculateGridColumns();
-            initLazyLoading();
-
-            // Enfocar primera card inmediatamente
-            const cards = getCardsFast();
-            if(cards.length > 0) {
-                // Cargar primeras imágenes rápidamente
-                for(let i = 0; i < Math.min(6, cards.length); i++) {
-                    const img = cards[i].querySelector('img[data-src]');
-                    if(img) loadImageWithAnimation(img);
-                }
-                setFocusGrid(0);
-            } else {
-                setFocusHeader(1);
-            }
-        })
-        .catch(() => {
-            el.grid.innerHTML = '<div class="msg">Error al cargar</div>';
-            setFocusHeader(1);
-        });
-}
-
-function mkCard(m) {
-    const d = document.createElement('div');
-    d.className = 'card';
-    d.tabIndex = -1;
-
-    const posterSrc = m.poster || '';
-    d.innerHTML = '<img data-src="' + esc(posterSrc) + '" alt="' + esc(m.title) + '">' +
-                  '<div class="card-t">' + esc(m.title) + '</div>';
-
-    d.onclick = () => {
-        const idx = Array.from(el.grid.querySelectorAll('.card')).indexOf(d);
-        if(idx >= 0 && S.movies[idx]) play(S.movies[idx]);
-    };
-
-    return d;
-}
-
-// ===== REPRODUCTOR OPTIMIZADO PARA EVITAR CONGELAMIENTOS =====
-let bufferCheckInterval = null;
-let isBuffering = false;
-
-function play(m) {
-    S.lastFocus = S.focus;
-    S.view = 'player';
-    S.retry = 0;
-    history.pushState({v:'player'},'','#player');
-    el.pErr.classList.remove('show');
-    el.pLoad.classList.add('show');
-    el.pLoadTxt.textContent = 'Conectando...';
-    el.pTitle.textContent = m.title;
-    el.player.classList.add('open');
-    
-    // Detener cualquier reproducción anterior
-    el.vid.pause();
-    el.vid.removeAttribute('src');
-    el.vid.load();
-    
-    // Configurar buffer para reproducción fluida
-    el.vid.preload = 'auto';
-    
-    // Iniciar reproducción inmediatamente
-    let u = m.url;
-    if(u.startsWith('http://') || location.protocol === 'https:') {
-        u = '/video-proxy?url=' + encodeURIComponent(u);
-    }
-    el.vid.src = u;
-    
-    // Intentar reproducir inmediatamente
-    el.vid.play().catch(playErr);
-    showUI();
-    
-    // Iniciar monitoreo de buffer
-    startBufferMonitoring();
-}
-
-function startBufferMonitoring() {
-    if (bufferCheckInterval) {
-        clearInterval(bufferCheckInterval);
-    }
-    
-    bufferCheckInterval = setInterval(() => {
-        if (!S.playing) return;
-        
-        try {
-            const buffered = el.vid.buffered;
-            const currentTime = el.vid.currentTime;
-            const duration = el.vid.duration;
-            
-            if (buffered.length > 0 && duration > 0) {
-                // Verificar si tenemos suficiente buffer
-                const bufferedEnd = buffered.end(buffered.length - 1);
-                const bufferAhead = bufferedEnd - currentTime;
-                
-                // Si el buffer es menor a 2 segundos, mostrar carga
-                if (bufferAhead < 2 && !el.vid.paused) {
-                    if (!isBuffering) {
-                        isBuffering = true;
-                        el.pLoad.classList.add('show');
-                        el.pLoadTxt.textContent = 'Buffering...';
-                    }
-                } else if (bufferAhead >= 2 && isBuffering) {
-                    isBuffering = false;
-                    el.pLoad.classList.remove('show');
-                }
-                
-                // Actualizar barra de buffer
-                el.pBuf.style.width = (bufferedEnd / duration * 100) + '%';
-            }
-        } catch (e) {
-            // Ignorar errores de buffer
+function moveUp() {
+    if (state.zone === 'grid') {
+        const cards = [...el.grid.querySelectorAll('.card')].filter(e => e.offsetParent);
+        const ci = cards.indexOf(state.focused);
+        if (ci >= 0 && ci < state.cols) {
+            saveFocus(); state.lastFocused.grid = state.focused; focusZone('cats');
+        } else if (ci >= state.cols) {
+            focus(cards[ci - state.cols]);
         }
-    }, 500);
-}
-
-function closeP() {
-    // Detener monitoreo de buffer
-    if (bufferCheckInterval) {
-        clearInterval(bufferCheckInterval);
-        bufferCheckInterval = null;
-    }
-    isBuffering = false;
-    
-    el.vid.pause();
-    el.vid.removeAttribute('src');
-    el.vid.load();
-    el.player.classList.remove('open');
-    S.view = 'home';
-
-    // Restaurar focus inmediatamente
-    setTimeout(() => {
-        if(S.lastFocus && S.lastFocus.classList) {
-            if(S.lastFocus.classList.contains('card')) {
-                const cards = getCardsFast();
-                const idx = cards.indexOf(S.lastFocus);
-                if(idx >= 0) {
-                    setFocusGrid(idx);
-                } else {
-                    setFocusHeader(0);
-                }
-            } else {
-                const idx = S.headerElements.indexOf(S.lastFocus);
-                if(idx >= 0) {
-                    setFocusHeader(idx);
-                } else {
-                    setFocusHeader(0);
-                }
-            }
-        } else {
-            setFocusHeader(0);
-        }
-    }, 10);
-}
-
-el.vid.onloadstart = () => {
-    el.pLoad.classList.add('show');
-    el.pErr.classList.remove('show');
-    el.pLoadTxt.textContent = 'Conectando...';
-};
-
-el.vid.oncanplay = () => {
-    el.pLoad.classList.remove('show');
-    S.retry = 0;
-    isBuffering = false;
-};
-
-el.vid.oncanplaythrough = () => {
-    // El video puede reproducirse completamente sin interrupciones
-    el.pLoad.classList.remove('show');
-    isBuffering = false;
-};
-
-el.vid.onwaiting = () => {
-    el.pLoad.classList.add('show');
-    el.pLoadTxt.textContent = 'Buffering...';
-    isBuffering = true;
-};
-
-el.vid.onplaying = () => {
-    el.pLoad.classList.remove('show');
-    S.playing = true;
-    el.pPp.textContent = '⏸';
-    isBuffering = false;
-};
-
-el.vid.onpause = () => {
-    S.playing = false;
-    el.pPp.textContent = '▶';
-};
-
-el.vid.ontimeupdate = () => {
-    if(!el.vid.duration) return;
-    el.pFill.style.width = (el.vid.currentTime / el.vid.duration * 100) + '%';
-    el.pCur.textContent = fmt(el.vid.currentTime);
-};
-
-el.vid.ondurationchange = () => el.pDur.textContent = fmt(el.vid.duration);
-
-el.vid.onprogress = () => {
-    try {
-        if(el.vid.buffered.length) {
-            el.pBuf.style.width = (el.vid.buffered.end(el.vid.buffered.length - 1) / el.vid.duration * 100) + '%';
-        }
-    } catch(e) {}
-};
-
-el.vid.onerror = () => {
-    const err = el.vid.error;
-    el.pErrTxt.textContent = err ? ['','Abortado','Red','Decode','No soportado'][err.code] || 'Error' : 'Error';
-    if(err && err.code === 2 && S.retry < 3) { // Aumentado a 3 reintentos
-        S.retry++;
-        el.pLoadTxt.textContent = 'Reintentando ' + S.retry + '/3...';
-        setTimeout(retry, 1000 * S.retry); // Backoff exponencial
-    } else {
-        el.pLoad.classList.remove('show');
-        el.pErr.classList.add('show');
-        isBuffering = false;
-    }
-};
-
-el.vid.onended = () => {
-    S.playing = false;
-    el.pPp.textContent = '▶';
-    showUI();
-    if (bufferCheckInterval) {
-        clearInterval(bufferCheckInterval);
-        bufferCheckInterval = null;
-    }
-};
-
-function playErr(e) {
-    if(e.name === 'NotAllowedError') {
-        showUI();
-        el.pLoad.classList.remove('show');
-    } else if(e.name === 'NotSupportedError') {
-        el.pErrTxt.textContent = 'No soportado';
-        el.pErr.classList.add('show');
-        el.pLoad.classList.remove('show');
-    } else if (e.name === 'AbortError') {
-        // Ignorar errores de aborto
-    } else {
-        // Otros errores, reintentar
-        if (S.retry < 3) {
-            S.retry++;
-            el.pLoadTxt.textContent = 'Reintentando ' + S.retry + '/3...';
-            setTimeout(retry, 1000 * S.retry);
-        }
+    } else if (state.zone === 'cats') {
+        saveFocus(); focusZone('hdr');
     }
 }
 
-function retry() {
-    el.pErr.classList.remove('show');
-    el.pLoad.classList.add('show');
-    el.pLoadTxt.textContent = 'Reintentando...';
-    const t = el.vid.currentTime || 0;
-    el.vid.pause();
-    el.vid.load();
-    setTimeout(() => {
-        // Mantener la misma URL
-        const currentSrc = el.vid.src;
-        if (currentSrc) {
-            el.vid.currentTime = t;
-            el.vid.play().catch(playErr);
-        }
-    }, 200);
+function moveDown() {
+    if (state.zone === 'hdr') {
+        saveFocus(); focusZone('cats');
+    } else if (state.zone === 'cats') {
+        saveFocus();
+        const cards = [...el.grid.querySelectorAll('.card')].filter(e => e.offsetParent);
+        if (cards.length) { state.zone = 'grid'; focus(cards[0]); }
+    } else if (state.zone === 'grid') {
+        const cards = [...el.grid.querySelectorAll('.card')].filter(e => e.offsetParent);
+        const ci = cards.indexOf(state.focused);
+        const ni = ci + state.cols;
+        if (ni < cards.length) focus(cards[ni]);
+        else if (state.hasMore) load(true, false);
+    }
 }
 
+function moveLeft() {
+    if (state.zone === 'hdr') {
+        if (state.focused === el.mix) focus(el.srch);
+    } else if (state.zone === 'cats') {
+        const cats = [...el.cats.querySelectorAll('.cat')];
+        const ci = cats.indexOf(state.focused);
+        if (ci > 0) focus(cats[ci - 1]);
+    } else if (state.zone === 'grid') {
+        const cards = [...el.grid.querySelectorAll('.card')].filter(e => e.offsetParent);
+        const ci = cards.indexOf(state.focused);
+        if (ci > 0) focus(cards[ci - 1]);
+    }
+}
+
+function moveRight() {
+    if (state.zone === 'hdr') {
+        if (state.focused === el.srch) focus(el.mix);
+    } else if (state.zone === 'cats') {
+        const cats = [...el.cats.querySelectorAll('.cat')];
+        const ci = cats.indexOf(state.focused);
+        if (ci < cats.length - 1) focus(cats[ci + 1]);
+    } else if (state.zone === 'grid') {
+        const cards = [...el.grid.querySelectorAll('.card')].filter(e => e.offsetParent);
+        const ci = cards.indexOf(state.focused);
+        if (ci < cards.length - 1) focus(cards[ci + 1]);
+    }
+}
+
+function activate() {
+    if (!state.focused) return;
+    if (state.focused === el.srch) { el.srch.focus(); return; }
+    state.focused.click();
+}
+
+// ===== PLAYER KEYS =====
 function playerKey(k) {
     showUI();
-    if(k === 'ArrowLeft') seek(-10);
-    else if(k === 'ArrowRight') seek(10);
-    else if(k === 'ArrowUp') vol(.1);
-    else if(k === 'ArrowDown') vol(-.1);
-    else if(k === 'Enter' || k === ' ') toggle();
-    else if(k === 'Escape' || k === 'Backspace') history.back();
+    switch (k) {
+        case 'ArrowLeft': seek(-10); break;
+        case 'ArrowRight': seek(10); break;
+        case 'ArrowUp': vol(0.1); break;
+        case 'ArrowDown': vol(-0.1); break;
+        case 'Enter': case ' ': togglePlay(); break;
+    }
 }
 
-function toggle() {
-    if(el.vid.paused) {
-        el.vid.play().catch(playErr);
-        showInd('▶');
-        // Reiniciar monitoreo de buffer
-        startBufferMonitoring();
-    } else {
-        el.vid.pause();
-        showInd('⏸');
-        if (bufferCheckInterval) {
-            clearInterval(bufferCheckInterval);
-            bufferCheckInterval = null;
-        }
-    }
+function togglePlay() {
+    if (el.vid.paused) { el.vid.play().catch(handlePlayError); showInd('▶'); }
+    else { el.vid.pause(); showInd('⏸'); }
 }
 
 function seek(s) {
-    if(!el.vid.duration) return;
-    el.vid.currentTime = Math.max(0, Math.min(el.vid.currentTime + s, el.vid.duration));
+    el.vid.currentTime = Math.max(0, Math.min(el.vid.currentTime + s, el.vid.duration || 0));
     showInd((s > 0 ? '+' : '') + s + 's');
 }
 
 function vol(d) {
-    try {
-        el.vid.volume = Math.max(0, Math.min(1, el.vid.volume + d));
-    } catch(e) {}
+    el.vid.volume = Math.max(0, Math.min(1, el.vid.volume + d));
+    updateVol();
+    el.pVol.classList.add('show');
+    clearTimeout(volT);
+    volT = setTimeout(() => el.pVol.classList.remove('show'), 1500);
 }
 
-let hideT, indT;
-function showInd(t) {
-    el.pInd.textContent = t;
+function updateVol() {
+    const v = Math.round(el.vid.volume * 100);
+    el.pVolFill.style.height = v + '%';
+    el.pVolPct.textContent = v + '%';
+}
+
+function showInd(txt) {
+    el.pInd.textContent = txt;
     el.pInd.classList.add('show');
     clearTimeout(indT);
-    indT = setTimeout(() => el.pInd.classList.remove('show'), 400);
+    indT = setTimeout(() => el.pInd.classList.remove('show'), 500);
 }
 
 function showUI() {
     el.pUi.classList.remove('hide');
     clearTimeout(hideT);
     hideT = setTimeout(() => {
-        if(S.playing) el.pUi.classList.add('hide');
-    }, 2500);
+        if (state.playing && !el.pNext.classList.contains('show')) el.pUi.classList.add('hide');
+    }, 3000);
+}
+
+// ===== PLAYER SETUP =====
+function setupPlayer() {
+    const v = el.vid;
+    v.preload = 'auto'; v.playsInline = true;
+
+    v.addEventListener('loadstart', () => { el.pLoad.classList.add('show'); el.pErr.classList.remove('show'); el.pLoadTxt.textContent = 'Conectando...'; updateStatus('Conectando...'); });
+    v.addEventListener('loadedmetadata', () => { el.pLoadTxt.textContent = 'Cargando video...'; updateStatus('Preparando...'); });
+    v.addEventListener('loadeddata', () => { el.pLoadTxt.textContent = 'Casi listo...'; });
+    v.addEventListener('canplay', () => { el.pLoad.classList.remove('show'); updateStatus(''); state.retryCount = 0; });
+    v.addEventListener('canplaythrough', () => { el.pLoad.classList.remove('show'); updateStatus(''); });
+    v.addEventListener('waiting', () => { el.pLoad.classList.add('show'); el.pLoadTxt.textContent = 'Buffering...'; updateStatus('Buffering...'); });
+    v.addEventListener('playing', () => { el.pLoad.classList.remove('show'); state.playing = true; el.pPp.textContent = 'PAUSE'; hideNext(); updateStatus(''); startBufferMonitor(); });
+    v.addEventListener('pause', () => { state.playing = false; el.pPp.textContent = 'PLAY'; stopBufferMonitor(); });
+    v.addEventListener('timeupdate', () => { updateProg(); checkNext(); });
+    v.addEventListener('progress', updateBuf);
+    v.addEventListener('durationchange', () => { el.pDur.textContent = fmt(v.duration); });
+    v.addEventListener('volumechange', updateVol);
+    v.addEventListener('ended', () => { stopBufferMonitor(); showNext(); });
+    v.addEventListener('error', handleVideoError);
+    v.addEventListener('stalled', () => { updateStatus('Reconectando...'); el.pLoadTxt.textContent = 'Reconectando...'; });
+
+    el.pPp.onclick = togglePlay;
+    el.pRw.onclick = () => seek(-10);
+    el.pFw.onclick = () => seek(10);
+    el.pPrev.onclick = prevMovie;
+    el.pNxt.onclick = nextMovie;
+    el.pRetry.onclick = retry;
+    el.pBack.onclick = () => history.back();
+    el.pNextPlay.onclick = nextMovie;
+    el.pNextCancel.onclick = cancelNext;
+    el.pBar.onclick = e => {
+        const r = el.pBar.getBoundingClientRect();
+        el.vid.currentTime = ((e.clientX - r.left) / r.width) * el.vid.duration;
+    };
+}
+
+function handleVideoError() {
+    const error = el.vid.error;
+    let msg = 'Error desconocido';
+    if (error) { switch(error.code) { case 1: msg='Carga abortada'; break; case 2: msg='Error de red'; break; case 3: msg='Error de decodificación'; break; case 4: msg='Formato no soportado'; break; } }
+    el.pErrSub.textContent = msg;
+    if (error && error.code === 2 && state.retryCount < state.maxRetries) {
+        state.retryCount++;
+        el.pLoadTxt.textContent = 'Reintentando... (' + state.retryCount + '/' + state.maxRetries + ')';
+        updateStatus('Reintentando...');
+        setTimeout(retry, 2000);
+    } else { el.pLoad.classList.remove('show'); el.pErr.classList.add('show'); stopBufferMonitor(); }
+}
+
+function handlePlayError(e) { if (e.name === 'NotAllowedError') el.pPp.textContent = 'PLAY'; }
+function updateStatus(text) { el.pStatus.textContent = text; }
+
+function startBufferMonitor() {
+    stopBufferMonitor();
+    bufferCheckT = setInterval(() => {
+        if (el.vid.buffered.length > 0) {
+            const ahead = el.vid.buffered.end(el.vid.buffered.length - 1) - el.vid.currentTime;
+            if (ahead < 10 && !el.vid.paused) updateStatus('Buffer bajo...');
+            else if (ahead > 20) updateStatus('');
+        }
+    }, 1000);
+}
+
+function stopBufferMonitor() { if (bufferCheckT) { clearInterval(bufferCheckT); bufferCheckT = null; } }
+
+function updateProg() {
+    const p = el.vid.duration ? (el.vid.currentTime / el.vid.duration) * 100 : 0;
+    el.pBarFill.style.width = p + '%';
+    el.pBarDot.style.left = p + '%';
+    el.pCur.textContent = fmt(el.vid.currentTime);
+}
+
+function updateBuf() {
+    if (el.vid.buffered.length) {
+        const p = (el.vid.buffered.end(el.vid.buffered.length - 1) / el.vid.duration) * 100;
+        el.pBarBuf.style.width = p + '%';
+    }
+}
+
+function retry() {
+    el.pErr.classList.remove('show'); el.pLoad.classList.add('show'); el.pLoadTxt.textContent = 'Reintentando...';
+    const t = el.vid.currentTime, s = el.vid.src;
+    el.vid.src = '';
+    setTimeout(() => { el.vid.src = s; el.vid.currentTime = t; el.vid.play().catch(handlePlayError); }, 500);
+}
+
+function checkNext() {
+    const rem = (el.vid.duration || 0) - el.vid.currentTime;
+    if (rem <= 15 && rem > 0 && hasNext() && !nextT) showNext();
+}
+
+function showNext() {
+    if (!hasNext()) return;
+    const n = state.currentList[state.movieIdx + 1];
+    el.pNextT.textContent = n.title;
+    el.pNext.classList.add('show');
+    let c = 8;
+    el.pNextCd.textContent = 'En ' + c + 's';
+    nextT = setInterval(() => { c--; el.pNextCd.textContent = 'En ' + c + 's'; if (c <= 0) { clearInterval(nextT); nextT = null; nextMovie(); } }, 1000);
+    showUI();
+}
+
+function hideNext() { el.pNext.classList.remove('show'); if (nextT) { clearInterval(nextT); nextT = null; } }
+function cancelNext() { hideNext(); }
+function hasNext() { return state.movieIdx < state.currentList.length - 1; }
+function nextMovie() { hideNext(); if (hasNext()) { state.movieIdx++; playMovie(state.currentList[state.movieIdx]); } }
+function prevMovie() { if (state.movieIdx > 0) { state.movieIdx--; playMovie(state.currentList[state.movieIdx]); } }
+
+function playMovie(movie) {
+    state.retryCount = 0; hideNext(); el.pErr.classList.remove('show'); el.pLoad.classList.add('show'); el.pLoadTxt.textContent = 'Conectando...';
+    let u = movie.url;
+    if (u.startsWith('http://')) u = '/video-proxy?url=' + encodeURIComponent(u);
+    el.vid.pause(); el.vid.removeAttribute('src'); el.vid.load();
+    setTimeout(() => { el.vid.src = u; el.pTitle.textContent = movie.title; el.vid.play().catch(handlePlayError); showUI(); }, 100);
 }
 
 function fmt(s) {
-    if(!s || !isFinite(s)) return '0:00';
-    const h = ~~(s / 3600);
-    const m = ~~(s % 3600 / 60);
-    const ss = ~~(s % 60);
-    return h ? h + ':' + String(m).padStart(2, '0') + ':' + String(ss).padStart(2, '0') : m + ':' + String(ss).padStart(2, '0');
+    if (!s || isNaN(s)) return '0:00';
+    const h = Math.floor(s/3600), m = Math.floor((s%3600)/60), ss = Math.floor(s%60);
+    return h > 0 ? h+':'+String(m).padStart(2,'0')+':'+String(ss).padStart(2,'0') : m+':'+String(ss).padStart(2,'0');
 }
 
-// Eventos del reproductor
-el.pPp.onclick = toggle;
-el.pRw.onclick = () => seek(-10);
-el.pFw.onclick = () => seek(10);
-el.pBar.onclick = e => {
-    const r = el.pBar.getBoundingClientRect();
-    if(el.vid.duration) el.vid.currentTime = (e.clientX - r.left) / r.width * el.vid.duration;
-};
-el.pRetry.onclick = retry;
-el.pBack.onclick = () => history.back();
-el.player.onclick = e => {
-    if(e.target === el.vid) {
-        toggle();
-        showUI();
-    }
-};
-el.player.onmousemove = showUI;
+// ===== CARGA =====
+function load(append, random) {
+    if (state.loading || (append && !state.hasMore)) return;
+    state.loading = true;
+    if (!append) { el.grid.innerHTML = '<div class="msg load">Cargando</div>'; state.page = 0; state.hasMore = true; state.currentList = []; }
 
-let tx, ty;
-el.vid.ontouchstart = e => {
-    tx = e.touches[0].clientX;
-    ty = e.touches[0].clientY;
-};
-el.vid.ontouchend = e => {
-    const dx = e.changedTouches[0].clientX - tx;
-    const dy = e.changedTouches[0].clientY - ty;
-    if(Math.abs(dx) > 50 && Math.abs(dy) < 50) seek(dx > 0 ? 10 : -10);
-    else showUI();
-};
-el.pBar.ontouchstart = el.pBar.ontouchmove = e => {
-    e.preventDefault();
-    const r = el.pBar.getBoundingClientRect();
-    if(el.vid.duration) {
-        el.vid.currentTime = Math.max(0, Math.min(1, (e.touches[0].clientX - r.left) / r.width)) * el.vid.duration;
-    }
-};
+    let u = '/api/movies?page=' + state.page + '&limit=250';
+    if (el.srch.value.trim()) u += '&q=' + encodeURIComponent(el.srch.value.trim());
+    if (state.activeCat) u += '&cat=' + encodeURIComponent(state.activeCat);
+    if (random) u += '&random=true';
 
-function esc(s) {
-    return s ? String(s).replace(/[&<>"']/g, c => ({
-        '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
-    })[c]) : '';
+    fetch(u).then(r => r.json()).then(d => {
+        if (!append) el.grid.innerHTML = '';
+        if (!d.data.length && !append) { el.grid.innerHTML = '<div class="msg">Sin resultados en esta categoría</div>'; return; }
+        d.data.forEach(m => { state.currentList.push(m); el.grid.appendChild(mkCard(m, state.currentList.length - 1)); });
+        state.page++; state.hasMore = d.hasMore;
+        calcCols();
+        if (!append) setTimeout(() => focusZone('grid'), 50);
+    }).catch(() => { if (!append) el.grid.innerHTML = '<div class="msg">Error al cargar</div>'; })
+    .finally(() => state.loading = false);
 }
 
-// Iniciar aplicación
-init();
+function mkCard(m, idx) {
+    const d = document.createElement('div');
+    d.className = 'card';
+    d.innerHTML = '<img data-src="' + esc(m.logo) + '"><div class="card-t">' + esc(m.title) + '</div>';
+    obs.observe(d.querySelector('img'));
+    d.onclick = () => openPlayer(idx);
+    return d;
+}
 
-// Recalcular columnas al redimensionar
-let resizeTimer;
-window.addEventListener('resize', () => {
-    clearTimeout(resizeTimer);
-    resizeTimer = setTimeout(() => {
-        calculateGridColumns();
-    }, 50);
-});
+const obs = new IntersectionObserver(es => {
+    es.forEach(e => {
+        if (e.isIntersecting) {
+            const i = e.target;
+            if (i.dataset.src) { i.src = i.dataset.src; i.onload = () => i.classList.add('ok'); i.onerror = () => i.classList.add('err'); }
+            obs.unobserve(i);
+        }
+    });
+}, { rootMargin: '200px' });
 
-// Actualizar cache de cards periódicamente
-setInterval(refreshCardCache, 500);
+function openPlayer(idx) {
+    saveFocus(); state.view = 'player'; state.movieIdx = idx;
+    pushView('player'); playMovie(state.currentList[idx]); el.player.classList.add('open');
+}
+
+function closePlayerInternal() {
+    el.vid.pause(); el.vid.removeAttribute('src'); el.vid.load();
+    el.player.classList.remove('open'); state.view = 'home'; hideNext(); stopBufferMonitor();
+    setTimeout(() => focusZone('grid'), 50);
+}
+
+// ===== MOUSE =====
+function setupMouse() {
+    el.mix.onclick = () => load(false, true);
+    let t;
+    el.srch.oninput = () => { clearTimeout(t); t = setTimeout(() => { state.activeCat = ''; [...el.cats.querySelectorAll('.cat')].forEach(b => b.classList.toggle('on', !b.dataset.cat)); load(false, false); }, 300); };
+    el.main.onscroll = () => {
+        if (!state.loading && state.hasMore) {
+            const { scrollTop, scrollHeight, clientHeight } = el.main;
+            if (scrollTop + clientHeight >= scrollHeight - 300) load(true, false);
+        }
+    };
+    el.player.onclick = e => { if (e.target === el.vid) { togglePlay(); showUI(); } };
+    el.player.onmousemove = showUI;
+    el.player.ontouchmove = showUI;
+}
+
+function esc(s) { return s ? String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[c]) : ''; }
 })();
-</script></body></html>`));
+</script>
+</body>
+</html>`;
 
-app.listen(PORT,'0.0.0.0',()=>console.log('🎬 Movies+ → Puerto '+PORT+' | '+MOVIES.length+' películas'));
+app.get('/', (req, res) => { res.setHeader('Content-Type', 'text/html'); res.send(HTML); });
+app.get('/health', (req, res) => res.json({ ok: true, movies: MOVIES_LIST.length }));
+app.use((req, res) => res.status(404).json({ error: 'Not found' }));
+
+app.listen(PORT, '0.0.0.0', () => {
+    console.log('Stream+ Películas | Puerto ' + PORT + ' | ' + MOVIES_LIST.length + ' películas');
+});
