@@ -461,33 +461,54 @@ app.get('/api/movies', (req, res) => {
     res.json({ total: list.length, page, hasMore: start + limit < list.length, data: list.slice(start, start + limit) });
 });
 
-app.get('/video-proxy', videoProxyLimiter, (req, res) => {
+// Proxy de video optimizado con mejor manejo de buffer
+app.get('/video-proxy', (req, res) => {
     const url = req.query.url;
-    if (!url) return res.status(400).json({ error: 'URL requerida' });
-
+    if (!url) return res.status(400).end();
     let parsed;
-    try {
-        parsed = new URL(decodeURIComponent(url));
-    } catch (e) {
-        return res.status(400).json({ error: 'URL inválida' });
-    }
-
+    try { parsed = new URL(decodeURIComponent(url)); } catch { return res.status(400).end(); }
     const client = parsed.protocol === 'https:' ? https : http;
-    const opts = {
-        hostname: parsed.hostname,
-        port: parsed.port || (parsed.protocol === 'https:' ? 443 : 80),
-        path: parsed.pathname + parsed.search,
-        method: 'GET',
-        timeout: 120000,
-        headers: {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-            'Accept': '*/*',
-            'Accept-Language': 'es-ES,es;q=0.9,en;q=0.8',
-            'Accept-Encoding': 'identity',
-            'Connection': 'keep-alive',
-            'Referer': parsed.origin + '/'
-        }
+    const headers = { 
+        'User-Agent': 'Mozilla/5.0', 
+        'Accept': '*/*', 
+        'Accept-Encoding': 'identity',
+        'Referer': parsed.origin + '/',
+        'Connection': 'keep-alive'
     };
+    if (req.headers.range) headers['Range'] = req.headers.range;
+    
+    const proxyReq = client.request({ 
+        hostname: parsed.hostname, 
+        port: parsed.port || (parsed.protocol === 'https:' ? 443 : 80), 
+        path: parsed.pathname + parsed.search, 
+        headers, 
+        timeout: 60000 // Aumentado a 60 segundos
+    }, proxyRes => {
+        if ([301, 302, 307, 308].includes(proxyRes.statusCode) && proxyRes.headers.location) {
+            proxyRes.destroy();
+            return res.redirect(307, '/video-proxy?url=' + encodeURIComponent(proxyRes.headers.location));
+        }
+        const h = { 
+            'Content-Type': proxyRes.headers['content-type'] || 'video/mp4', 
+            'Accept-Ranges': 'bytes',
+            'Cache-Control': 'no-cache'
+        };
+        if (proxyRes.headers['content-length']) h['Content-Length'] = proxyRes.headers['content-length'];
+        if (proxyRes.headers['content-range']) h['Content-Range'] = proxyRes.headers['content-range'];
+        res.writeHead(proxyRes.statusCode, h);
+        proxyRes.pipe(res);
+        proxyRes.on('error', () => res.end());
+    });
+    proxyReq.on('error', () => !res.headersSent && res.status(502).end());
+    proxyReq.on('timeout', () => { proxyReq.destroy(); !res.headersSent && res.status(504).end(); });
+    req.on('close', () => proxyReq.destroy());
+    proxyReq.end();
+});
+
+
+
+
+
 
     if (req.headers.range) opts.headers['Range'] = req.headers.range;
 
